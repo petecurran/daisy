@@ -134,6 +134,16 @@ function setMode(m) {
 document.getElementById('mode-chords').onclick = () => setMode('chords');
 document.getElementById('mode-notes').onclick = () => setMode('notes');
 
+// Worn key contacts sometimes never send a note-off, leaving a note droning. Esc clears everything.
+function panic() {
+  chords?.allOff();
+  if (chords) chords.refs.clear();
+  engine?.allOff();
+  engine?.all.forEach((v) => v.done || v.kill());
+  showChord(null);
+}
+document.getElementById('panic').onclick = panic;
+
 // ---------- Joystick ----------
 
 function updateJoystick() {
@@ -269,6 +279,7 @@ connectMidi({
 const heldKeys = new Set();
 window.addEventListener('keydown', (e) => {
   if (e.target.tagName === 'SELECT' || e.target.tagName === 'INPUT') return;
+  if (e.key === 'Escape') return panic();
   if (e.key === 'Tab') { e.preventDefault(); return setMode(mode === 'chords' ? 'notes' : 'chords'); }
   if (e.key === 'ArrowRight') return selectPreset(presetIndex + 1);
   if (e.key === 'ArrowLeft') return selectPreset(presetIndex - 1);

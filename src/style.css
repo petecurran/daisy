@@ -114,3 +114,9 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-
   .chord-panel { grid-template-columns: 1fr; grid-template-areas: "display" "grid" "controls"; }
   .joy-grid { justify-self: center; grid-template-columns: repeat(3, 80px); }
 }
+
+.panic {
+  margin-left: auto; font: inherit; font-size: 12px; padding: 5px 12px; border-radius: 99px; cursor: pointer;
+  background: transparent; color: var(--muted); border: 1px solid var(--line);
+}
+.panic:hover { color: var(--text); border-color: #a0503a; }
