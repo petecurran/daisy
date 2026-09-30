@@ -106,9 +106,16 @@ function showLatency() {
 
 // ---------- Inputs ----------
 
+// Some of this MPK's keys have worn contacts and report velocity 1 however hard they're hit.
+// Treat those as a normal hit, and lift the soft end of the range so nothing plays near-silent.
+function velocityCurve(v) {
+  if (v <= 4) return 96;
+  return Math.round(45 + (v / 127) * 82);
+}
+
 function noteOn(n, v) {
   if (!engine || engine.ctx.state !== 'running') return;
-  engine.noteOn(n, v);
+  engine.noteOn(n, velocityCurve(v));
 }
 function noteOff(n) { engine?.noteOff(n); }
 
