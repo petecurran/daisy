@@ -22,10 +22,10 @@ const PAD_B = 32;
 // Each pad: `down`/`up` fire instantly; `tap`/`hold` wait to see how long the pad is held.
 const PAD_ACTIONS = [
   { label: 'Play / Stop drums', sub: 'hold: stop everything', tap: () => toggleDrums(), hold: () => stopEverything() },
-  { label: 'Fill', sub: 'hold: next look', tap: () => seq.playing && seq.queueFill(), hold: () => (stage.visible ? stage.nextMode() : stage.show(true)) },
+  { label: 'Fill', sub: 'hold: next look', tap: () => seq.playing && seq.queueFill(), hold: () => { stage.show(true); stage.nextLook(); } },
   { label: '◀ Pattern', sub: 'hold: time sig', tap: () => seq.shiftPattern(-1), hold: () => seq.shiftSignature(-1) },
   { label: 'Pattern ▶', sub: 'hold: time sig', tap: () => seq.shiftPattern(1), hold: () => seq.shiftSignature(1) },
-  { label: 'Knobs: Sound ⇄ Drums', sub: 'hold: stage view', tap: () => setKnobPage(knobPage === 'sound' ? 'drums' : 'sound'), hold: () => stage.show() },
+  { label: 'Knobs: Sound ⇄ Drums', sub: 'hold: next sound', tap: () => setKnobPage(knobPage === 'sound' ? 'drums' : 'sound'), hold: () => selectPreset(presetIndex + 1) },
   { label: 'Tap tempo', down: () => { seq.tap(); engine.syncEcho(seq.bpm); } },
   { label: 'Break (hold)', down: () => { seq.breakHeld = true; renderDrums(); }, up: () => { seq.breakHeld = false; renderDrums(); } },
   { label: 'Looper', sub: 'tap · 2×tap stop · hold undo', down: () => looper.padDown(), up: () => looper.padUp() },
@@ -462,7 +462,9 @@ function ensureEngine() {
       engine, seq, looper, chords, joy,
       knobs: () => KNOB_PAGES[knobPage],
       page: () => knobPage,
+      preset: () => PRESETS[presetIndex],
     });
+    stage.show(true); // the stage is the main view; V flips to the settings page
     window.vibesynth = { engine, seq, looper, chords, stage }; // handy in the devtools console
     syncChordSettings();
     selectPreset(presetIndex);
@@ -556,7 +558,7 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   if (e.key.toLowerCase() === 'v') { ensureEngine(); return stage.show(); }
-  if (stage?.visible && ['1', '2', '3'].includes(e.key)) return stage.nextMode(+e.key - 1 - stage.mode);
+  if (stage?.visible && ['1', '2'].includes(e.key)) return stage.setLook(+e.key - 1);
   if (e.key === 'Tab') { e.preventDefault(); return setMode(mode === 'chords' ? 'notes' : 'chords'); }
   if (e.key === ' ') { e.preventDefault(); ensureEngine(); return seq.toggle(); }
   if (e.key === 'ArrowRight') return selectPreset(presetIndex + 1);

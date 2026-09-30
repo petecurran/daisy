@@ -10,7 +10,7 @@
   <header>
     <h1>VibeSynth</h1>
     <div class="status">
-      <button id="stage-btn" class="stage-btn" title="Stage view (V, or hold pad 5)">▣ Stage</button>
+      <button id="stage-btn" class="stage-btn" title="Stage view (V)">▣ Stage</button>
       <span id="joy-status" class="pill">Joystick: factory mode (up = down)</span>
       <span id="midi-status" class="pill">MIDI: not connected</span>
       <span id="latency" class="pill">Audio: off</span>
@@ -128,7 +128,9 @@
 
   <div id="stage" class="stage hidden">
     <canvas class="screen"></canvas>
-    <canvas class="mpk"></canvas>
+    <canvas class="hud"></canvas>
+    <div class="deck"></div>
+    <div class="stage-hint">V · settings &nbsp; 1 · 2 looks &nbsp; Esc · stop all</div>
   </div>
 
   <script type="module" src="src/main.js"></script>
