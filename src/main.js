@@ -22,7 +22,7 @@ const PAD_B = 32;
 // Each pad: `down`/`up` fire instantly; `tap`/`hold` wait to see how long the pad is held.
 const PAD_ACTIONS = [
   { label: 'Play / Stop drums', sub: 'hold: stop everything', tap: () => toggleDrums(), hold: () => stopEverything() },
-  { label: 'Fill', sub: 'hold: next look', tap: () => seq.playing && seq.queueFill(), hold: () => { stage.show(true); stage.nextLook(); } },
+  { label: 'Fill', down: () => seq.playing && seq.queueFill() },
   { label: '◀ Pattern', sub: 'hold: time sig', tap: () => seq.shiftPattern(-1), hold: () => seq.shiftSignature(-1) },
   { label: 'Pattern ▶', sub: 'hold: time sig', tap: () => seq.shiftPattern(1), hold: () => seq.shiftSignature(1) },
   { label: 'Knobs: Sound ⇄ Drums', sub: 'hold: next sound', tap: () => setKnobPage(knobPage === 'sound' ? 'drums' : 'sound'), hold: () => selectPreset(presetIndex + 1) },
@@ -558,7 +558,6 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   if (e.key.toLowerCase() === 'v') { ensureEngine(); return stage.show(); }
-  if (stage?.visible && ['1', '2'].includes(e.key)) return stage.setLook(+e.key - 1);
   if (e.key === 'Tab') { e.preventDefault(); return setMode(mode === 'chords' ? 'notes' : 'chords'); }
   if (e.key === ' ') { e.preventDefault(); ensureEngine(); return seq.toggle(); }
   if (e.key === 'ArrowRight') return selectPreset(presetIndex + 1);

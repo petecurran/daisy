@@ -8,7 +8,7 @@ import { ZONE_LABELS } from '../chords.js';
 // Pads in hardware order (index 0 = pad 1). Top row on the MPK is pads 5-8.
 const PADS = [
   { hold: 'hold: stop all' },
-  { icon: 'fill', label: 'Fill', hold: 'hold: next look' },
+  { icon: 'fill', label: 'Fill' },
   { icon: 'prev', label: 'Groove', hold: 'hold: time sig' },
   { icon: 'next', label: 'Groove', hold: 'hold: time sig' },
   { icon: 'sliders', hold: 'hold: next sound' },

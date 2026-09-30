@@ -1,71 +1,92 @@
-// TREE RINGS: after Josef Albers' nested colour fields. Every chord is a solid band of its colour
-// that grows out of the keyboard and fills all the way to the chord before it, so the screen is
-// mostly colour: your progression as rings, newest in the middle. The band is made of living
-// pixels that shimmer; the kick sends a bright ripple outward, the hats make the pixels sparkle.
+// TREE RINGS: after Josef Albers' nested colour fields. Every chord is a band of its colour that
+// grows out of the keyboard and fills back to the chord before it, so the screen is mostly colour.
+// Each band is made of its own pixels: they ride outward with the wave and fan apart as it grows,
+// and near the edges of the screen they scatter and drop out, so waves dissolve into dust.
+// Knobs reshape the waves: wobble bends, resonance spikes, chorus doubles, echo leaves ghost
+// edges, drive makes the pixels bigger and hotter, reverb slows everything down.
 
 const MAX = 32;
 
 const FRAG = `
 #define MAX ${MAX}
+#define PI 3.14159265
 uniform int count;
-uniform float radii[MAX];     // outer edge of each chord's band (px), newest first
+uniform float radii[MAX];     // leading edge of each chord's band (px), newest first
 uniform vec3 colors[MAX];
 uniform float alive[MAX];     // 1 while held, fading after release
-uniform float sparkle[MAX];   // extra shimmer for colourful chords (9ths etc.)
-uniform vec2 origin, res;
-uniform float time, pulse, ripple, rippleAmp, shimmer, wobble, split, cell, heat, exposure;
+uniform float seeds[MAX];
+uniform float sparkle[MAX];   // extra glitter for colourful chords (9ths etc.)
+uniform vec2 origin;
+uniform float maxR;
+uniform float time, pulse, ripple, rippleAmp, shimmer, scatter, wobble, spikes, split, echoGap, echo, cell, heat, exposure;
 
-float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float hash(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
 
-// Which band a radius falls in, and how far through it (0 inner .. 1 outer edge).
-int bandAt(float r, out float t) {
-  float inner = 0.0;
-  for (int i = 0; i < MAX; i++) {
-    if (i >= count) break;
-    if (r < radii[i]) { t = (r - inner) / max(1.0, radii[i] - inner); return i; }
-    inner = radii[i];
-  }
-  t = 0.0;
-  return -1;
+// The wave's edge, bent by the knobs.
+float shapeOffset(float ang, float seed) {
+  float w = sin(ang * 6.0 + time * 2.3 + seed) * wobble * 22.0
+          + sin(ang * 13.0 - time * 1.7 + seed * 2.0) * wobble * 7.0;
+  float s = pow(abs(sin(ang * 18.0 + seed)), 10.0) * spikes * 38.0;
+  return w + s;
 }
 
-vec3 shade(float r, float ang, vec2 frag) {
-  float t;
-  // Tape wobble bends the rings; the kick's ripple pushes them outward as it passes.
-  float rr = r + sin(ang * 6.0 + time * 2.3) * wobble * 14.0
-               - rippleAmp * 18.0 * exp(-pow((r - ripple) / 40.0, 2.0));
-  int i = bandAt(rr, t);
-  if (i < 0) return vec3(0.0);
-  vec3 c = colors[i] * (0.35 + 0.65 * alive[i]);
-  // Living pixels: each cell pulses at its own rate; hats and colourful chords make them glitter.
-  vec2 cid = floor(frag / cell);
-  float h = hash(cid);
-  float beat = 0.5 + 0.5 * sin(time * (1.5 + h * 3.0) + h * 40.0);
-  float glitter = hash(cid + floor(time * 12.0));
-  c *= 0.78 + 0.22 * beat + (shimmer + sparkle[i]) * (glitter - 0.5) * 0.8;
-  // Grid between the pixels, faint.
-  vec2 g = fract(frag / cell);
-  c *= 0.86 + 0.14 * step(0.12, min(g.x, g.y));
-  // Bright leading edge + a dark seam between chords.
-  float edge = radii[i] - rr;
-  c += colors[i] * 0.9 * smoothstep(5.0, 0.0, edge);
-  c *= smoothstep(0.0, 2.5, edge + 0.5) * 0.7 + 0.3;
-  // Kick ripple glow.
-  c += c * rippleAmp * 1.4 * exp(-pow((r - ripple) / 26.0, 2.0));
-  return c;
+vec3 shade(float r, float ang) {
+  for (int i = 0; i < MAX; i++) {
+    if (i >= count) break;
+    float edge = radii[i] + shapeOffset(ang, seeds[i]) - rippleAmp * 16.0 * exp(-pow((r - ripple) / 40.0, 2.0));
+    if (r >= edge) continue;
+
+    vec3 col = colors[i] * (0.4 + 0.6 * alive[i]);
+    // Dissolve: dense and solid for most of the screen, breaking into dust towards the edges.
+    float age = smoothstep(0.5, 1.0, r / maxR);
+    float depth = edge - r;                  // px behind the leading edge: travels with the wave
+
+    // The wave's own pixel lattice: rows in depth, a fixed number of columns around the arc, so
+    // the columns fan apart as the wave grows.
+    float cols = 150.0;
+    float arc = max(r, 1.0) * PI / cols;
+    float rowF = depth / cell, colF = ang / PI * cols;
+    vec2 id = floor(vec2(rowF, colF));
+    float h = hash(vec3(id, seeds[i]));
+    float h2 = hash(vec3(id.yx, seeds[i] + 7.0));
+    // Scatter: with age (and snare hits) each pixel drifts off its spot and some drop out.
+    float drift = (age * 0.9 + scatter) * cell;
+    vec2 local = vec2(fract(rowF) * cell, fract(colF) * arc);
+    vec2 centre = vec2(cell * 0.5 + (h - 0.5) * drift, arc * 0.5 + (h2 - 0.5) * drift * 1.5);
+    float size = cell * 0.42;
+    float inside = step(abs(local.x - centre.x), size) * step(abs(local.y - centre.y), size);
+    float survive = step(age * 1.05, h * 0.95 + 0.05);
+    float twinkle = hash(vec3(id, floor(time * 12.0) + seeds[i]));
+    float glow = 0.75 + 0.35 * h + (shimmer + sparkle[i]) * (twinkle - 0.5) * 0.9;
+    vec3 c = col * inside * survive * glow;
+
+    // A soft wash of the band's colour behind its pixels, so the screen reads as colour.
+    c += col * 0.16 * (1.0 - age * 0.8);
+    // Bright leading edge, and echo: ghost edges trailing behind it.
+    c += col * 0.9 * smoothstep(cell * 1.6, 0.0, depth);
+    if (echo > 0.0) {
+      float k = depth / echoGap;
+      float ghost = smoothstep(0.08, 0.0, abs(fract(k) - 0.02)) * step(1.0, k) * step(k, 4.0);
+      c += col * ghost * echo * pow(0.6, floor(k));
+    }
+    // Kick ripple glow.
+    c += c * rippleAmp * 1.3 * exp(-pow((r - ripple) / 26.0, 2.0));
+    return c;
+  }
+  return vec3(0.0);
 }
 
 void main() {
-  vec2 frag = gl_FragCoord.xy;
-  vec2 d = frag - origin;
+  vec2 d = gl_FragCoord.xy - origin;
   float r = length(d);
-  float ang = atan(d.y, d.x);
+  float ang = atan(max(d.y, 0.0), d.x);
   vec3 c;
-  if (split > 0.01) {
-    // Chorus: the rings split into pink/cyan fringes.
-    c = vec3(shade(r + split, ang, frag).r, shade(r, ang, frag).g, shade(r - split, ang, frag).b);
+  if (split > 0.5) {
+    // Chorus: each wave splits into a pink and a cyan copy.
+    vec3 a = shade(r + split, ang), b = shade(r - split, ang), m = shade(r, ang);
+    c = m * 0.55 + a * vec3(1.0, 0.35, 0.75) * 0.5 + b * vec3(0.2, 0.8, 1.0) * 0.5;
   } else {
-    c = shade(r, ang, frag);
+    c = shade(r, ang);
   }
   c = vec3(1.0) - exp(-c * exposure * (1.0 + heat * 0.8) * (1.0 + pulse * 0.3));
   float luma = dot(c, vec3(0.299, 0.587, 0.114));
@@ -80,6 +101,7 @@ export class Rings {
     this.p = ctx.program(FRAG);
     this.ripple = 1e9;
     this.rippleAmp = 0;
+    this.scatter = 0;
   }
 
   resize() {}
@@ -89,35 +111,47 @@ export class Rings {
     this.rippleAmp = Math.min(1.2, 0.5 + vel);
   }
 
-  // rings: [{ radius, color: [r,g,b] 0..255, alive 0..1, sparkle }], newest first, radius in px.
+  snare(vel) { this.scatter = Math.min(1.2, this.scatter + vel * 0.6); }
+
+  // rings: [{ radius, color: [r,g,b] 0..255, alive, seed, sparkle }], newest first, radius px.
   render(dt, now, fx, rings, origin) {
     const { gl, blit } = this.ctx;
     this.ripple += dt * fx.rippleSpeed;
-    this.rippleAmp *= Math.pow(0.15, dt);
+    this.rippleAmp *= 0.15 ** dt;
+    this.scatter *= 0.02 ** dt;
     const n = Math.min(MAX, rings.length);
-    const radii = new Float32Array(MAX), colors = new Float32Array(MAX * 3), alive = new Float32Array(MAX), sparkle = new Float32Array(MAX);
+    const f = (k) => new Float32Array(MAX * k);
+    const radii = f(1), colors = f(3), alive = f(1), seeds = f(1), sparkle = f(1);
     for (let i = 0; i < n; i++) {
-      radii[i] = rings[i].radius;
-      colors.set(rings[i].color.map((v) => (v / 255) * 1.25), i * 3);
-      alive[i] = rings[i].alive;
-      sparkle[i] = rings[i].sparkle;
+      const r = rings[i];
+      radii[i] = r.radius;
+      colors.set(r.color.map((v) => (v / 255) * 1.25), i * 3);
+      alive[i] = r.alive;
+      seeds[i] = r.seed;
+      sparkle[i] = r.sparkle;
     }
     const u = this.p.use().u;
+    const d = fx.dpr;
     gl.uniform1i(u.count, n);
     gl.uniform1fv(u.radii, radii);
     gl.uniform3fv(u.colors, colors);
     gl.uniform1fv(u.alive, alive);
+    gl.uniform1f(u.maxR, fx.maxR);
+    gl.uniform1fv(u.seeds, seeds);
     gl.uniform1fv(u.sparkle, sparkle);
     gl.uniform2f(u.origin, origin[0], origin[1]);
-    gl.uniform2f(u.res, gl.drawingBufferWidth, gl.drawingBufferHeight);
     gl.uniform1f(u.time, now);
     gl.uniform1f(u.pulse, fx.pulse);
     gl.uniform1f(u.ripple, this.ripple);
     gl.uniform1f(u.rippleAmp, this.rippleAmp);
     gl.uniform1f(u.shimmer, fx.shimmer);
-    gl.uniform1f(u.wobble, fx.wobble * fx.dpr);
-    gl.uniform1f(u.split, fx.split * 6 * fx.dpr);
-    gl.uniform1f(u.cell, fx.cell * 2); // chunkier living pixels in the rings
+    gl.uniform1f(u.scatter, this.scatter);
+    gl.uniform1f(u.wobble, fx.wobble * d);
+    gl.uniform1f(u.spikes, Math.max(0, fx.resonance - 0.5) * 2 * d);
+    gl.uniform1f(u.split, fx.split * 9 * d);
+    gl.uniform1f(u.echo, fx.echo);
+    gl.uniform1f(u.echoGap, Math.max(8 * d, fx.echoGap));
+    gl.uniform1f(u.cell, fx.cell * (1 + fx.heat * 1.2));
     gl.uniform1f(u.heat, fx.heat);
     gl.uniform1f(u.exposure, fx.exposure);
     blit(null);

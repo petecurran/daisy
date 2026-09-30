@@ -1,7 +1,6 @@
 import { bus } from '../bus.js';
 import { NOTE_NAMES } from '../chords.js';
 import { createGL } from './gl.js';
-import { Ink } from './fluid.js';
 import { Rings } from './rings.js';
 import { Deck } from './deck.js';
 import { ICON, KNOB_ICONS, KNOB_LABELS } from './icons.js';
@@ -12,7 +11,7 @@ const CHORD_GAP_MS = 70; // notes closer together than this belong to the same c
 const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
 const ICON_PATHS = Object.fromEntries(Object.entries(ICON).map(([k, d]) => [k, new Path2D(d)]));
 
-// Full-screen stage: a GPU "look" (Ink or Tree Rings) underneath, a crisp text layer on top, and
+// Full-screen stage: the Tree Rings (GPU) underneath, a crisp text layer on top, and
 // the deck (on-screen MPK + what-to-do-next guide) along the bottom.
 export class Stage {
   constructor(root, src) {
@@ -24,7 +23,7 @@ export class Stage {
     this.deck = new Deck(root.querySelector('.deck'), src);
     try {
       this.glx = createGL(this.glCanvas);
-      this.looks = [new Ink(this.glx), new Rings(this.glx)];
+      this.looks = [new Rings(this.glx)];
     } catch (e) {
       console.error(e);
       this.error = e.message;
@@ -38,7 +37,6 @@ export class Stage {
     this.popup = null;
     this.lookPopupAt = -1e9;
     this.step = null;
-    this.labels = [];
     addEventListener('resize', () => this.resize());
     this.listen();
   }
@@ -86,7 +84,7 @@ export class Stage {
   }
 
   newBurst(loop, now) {
-    const b = { notes: [], held: new Set(), born: now, releasedAt: null, vel: 0, loop, ghost: 0, attacked: false };
+    const b = { notes: [], held: new Set(), born: now, releasedAt: null, vel: 0, loop, ghost: 0, seed: Math.random() * 100 };
     // A new chord while the old one is still held (joystick re-voicing, legato playing): the new
     // ring takes over the notes that are still sounding, so it is analysed as the whole chord.
     for (const old of this.bursts) {
@@ -109,7 +107,6 @@ export class Stage {
     b.vel = Math.max(b.vel, vel / 127);
     b.chord = analyzeChord(b.notes);
     b.color = chordColor(b.chord);
-    if (!b.echoes) { b.echoes = true; this.spawnEchoes(b); }
   }
 
   onNoteOff({ note, loop = false }) {
@@ -124,56 +121,26 @@ export class Stage {
     }
   }
 
-  // Echo knob: ghost splashes of the chord at the echo's delay time.
-  spawnEchoes(b) {
-    const fx = this.src.engine.fx;
-    if (fx.values.echo < 0.05) return;
-    const gap = fx.echoDelay.delayTime.value;
-    const count = Math.round(1 + fx.values.echo * 3);
-    for (let k = 1; k <= count; k++) {
-      setTimeout(() => {
-        const t = performance.now() / 1000;
-        this.bursts.push({ ...b, notes: [...b.notes], held: new Set(), born: t, releasedAt: t, vel: b.vel * 0.55 ** k, ghost: k, attacked: false });
-      }, gap * 1000 * k);
-    }
-  }
-
   onDrum({ sound, vel }) {
-    const ink = this.looks[0];
-    const rings = this.looks[1];
-    const inkOn = this.look === 0 && ink;
-    const top = this.uvTop();
+    const rings = this.looks[0];
     switch (sound) {
       case 'kick':
         this.pulse = Math.min(1.5, this.pulse + vel);
-        rings?.kick(vel);
-        if (inkOn) for (let i = 0; i < 5; i++) ink.splat(0.1 + i * 0.2, top, 0, 420 * vel, null, 0.004);
+        rings?.kick(vel); // a bright ripple runs out through the rings
         break;
       case 'snare':
       case 'clap':
-        this.flash = Math.max(this.flash, 0.5 * vel);
-        this.shimmer = Math.min(1.5, this.shimmer + 0.5 * vel);
-        if (inkOn) {
-          for (let i = 0; i < 3; i++) {
-            const a = Math.random() * Math.PI * 2;
-            ink.splat(0.15 + Math.random() * 0.7, top + Math.random() * (1 - top) * 0.8, Math.cos(a) * 420, Math.sin(a) * 420, null, 0.0012);
-          }
-        }
+        rings?.snare(vel); // the pixels jump off their spots
+        this.shimmer = Math.min(1.5, this.shimmer + 0.4 * vel);
         break;
       case 'crash':
         this.flash = 1;
-        if (inkOn) ink.splat(0.5, top + 0.1, 0, 700, [1.4, 0.3, 0.9], 0.01);
         break;
       case 'chh': case 'shaker': case 'ohh':
-        this.shimmer = Math.min(1.5, this.shimmer + (sound === 'ohh' ? 0.6 : 0.25) * vel);
+        this.shimmer = Math.min(1.5, this.shimmer + (sound === 'ohh' ? 0.6 : 0.25) * vel); // glitter
         break;
-      default:
-        if (inkOn) ink.splat(Math.random(), top + 0.05, (Math.random() - 0.5) * 200, 200, null, 0.0008);
     }
   }
-
-  // Ink coordinates are 0..1 with y pointing up; the deck's top edge is where ink appears.
-  uvTop() { return 1 - (this.originCss?.[1] ?? innerHeight * 0.7) / innerHeight; }
 
   // ---------- frame ----------
 
@@ -184,12 +151,12 @@ export class Stage {
       exposure: 0.45 + e.macros.brightness * 1.1,
       split: v.chorus,
       heat: v.drive,
+      resonance: e.macros.resonance,
+      echo: v.echo,
       pulse: this.pulse,
       shimmer: this.shimmer * 0.8,
-      cell: 3 * this.dpr,
+      cell: 7 * this.dpr,
       wobble: v.wobble,
-      curl: 8 + v.wobble * 45,
-      dyeFade: 1.5 - v.reverb * 1.2,
       rippleSpeed: 1100 * this.dpr,
       reverb: v.reverb,
       dpr: this.dpr,
@@ -206,12 +173,7 @@ export class Stage {
     const fx = this.fx();
 
     const look = this.looks[this.look];
-    if (look instanceof Ink) {
-      this.pourInk(look, dt, now);
-      look.render(dt, now, fx);
-    } else if (look) {
-      look.render(dt, now, fx, this.ringList(now, fx), [this.originCss[0] * this.dpr, this.H - this.originCss[1] * this.dpr]);
-    }
+    look?.render(dt, now, fx, this.ringList(now, fx), [this.originCss[0] * this.dpr, this.H - this.originCss[1] * this.dpr]);
 
     this.hud(now);
     this.deck.update();
@@ -227,38 +189,15 @@ export class Stage {
     this.shimmer *= 0.05 ** dt;
     this.flash *= 0.01 ** dt;
     this.bursts = this.bursts.filter((b) => b.held.size || now - (b.releasedAt ?? now) < 40);
-  }
-
-  pourInk(ink, dt, now) {
-    const top = this.uvTop();
-    for (const b of this.bursts) {
-      if (!b.color || !b.notes.length) continue;
-      const strength = b.ghost ? 0.5 : 1;
-      const col = b.color.map((c) => c / 255);
-      if (!b.attacked) {
-        // The splash when a chord starts: every note shoots up from its key.
-        b.notes.forEach((note, j) => {
-          const u = this.deck.keyCenter(note)[0] / innerWidth;
-          const shade = 0.85 + (j % 3) * 0.15;
-          ink.splat(u, top, (Math.random() - 0.5) * 60, (260 + b.vel * 260) * strength, col.map((c) => c * 0.9 * shade * strength * (0.5 + b.vel)), 0.0014);
-        });
-        if (!b.ghost && b.chord) this.labels.push({ name: b.chord.name, color: b.color, born: now });
-        b.attacked = true;
-      } else if (!b.ghost) {
-        // While held, the keys keep pouring.
-        [...b.held].forEach((note, j) => {
-          const u = this.deck.keyCenter(note)[0] / innerWidth;
-          const shade = 0.85 + (j % 3) * 0.15;
-          ink.splat(u, top, (Math.random() - 0.5) * 30, 170, col.map((c) => c * 0.05 * shade * dt * 60), 0.0006);
-        });
-      }
-    }
+    if (this.bursts.length > 40) this.bursts.splice(0, this.bursts.length - 40);
   }
 
   // Newest chord first; each band runs from the previous (newer) chord's edge to its own.
   ringList(now, fx) {
-    const history = 12 + fx.reverb * 12;
+    const history = 12 + fx.reverb * 12; // reverb: slower waves that linger
     const speed = this.maxR / history;
+    fx.echoGap = this.src.engine.fx.echoDelay.delayTime.value * speed; // echo ghosts, one delay apart
+    fx.maxR = this.maxR;
     const rings = [];
     for (let i = this.bursts.length - 1; i >= 0 && rings.length < 32; i--) {
       const b = this.bursts[i];
@@ -266,10 +205,9 @@ export class Stage {
       const alive = b.held.size ? 1 : Math.exp(-(now - b.releasedAt) / 6);
       rings.push({
         radius: (now - b.born) * speed + 14 * this.dpr, color: b.color, alive,
-        sparkle: SHIMMER[b.chord?.type] ?? 0, name: b.chord?.name,
+        seed: b.seed, sparkle: SHIMMER[b.chord?.type] ?? 0,
       });
     }
-    this.rings = rings;
     return rings;
   }
 
@@ -388,32 +326,9 @@ export class Stage {
       }
     }
 
-    // Chord names in the picture: on each ring, or rising out of the ink.
     g.textAlign = 'center';
     g.textBaseline = 'middle';
-    const ox = this.originCss[0] * d, oy = this.originCss[1] * d;
-    if (this.look === 1 && this.rings) {
-      let inner = 14 * d;
-      shadow(false);
-      for (const r of this.rings) {
-        const mid = (inner + r.radius) / 2;
-        if (r.radius - inner > 26 * d && r.name && oy - mid > 130 * d) {
-          g.font = font(17, 800);
-          g.fillStyle = `rgba(13,14,22,${0.5 + 0.4 * r.alive})`;
-          g.fillText(r.name, ox, oy - mid);
-        }
-        inner = r.radius;
-      }
-      shadow(true);
-    } else if (this.look === 0) {
-      for (const l of this.labels) {
-        const age = now - l.born;
-        g.font = font(18, 800);
-        g.fillStyle = rgba(l.color, Math.max(0, 1 - age / 9));
-        g.fillText(l.name, ox, oy - 30 * d - age * 42 * d);
-      }
-      this.labels = this.labels.filter((l) => now - l.born < 9);
-    }
+    const oy = this.originCss[1] * d;
 
     // Knob popup.
     if (this.popup) {

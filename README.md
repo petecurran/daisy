@@ -25,10 +25,12 @@ Open http://localhost:5173 in Chromium, allow MIDI, click to wake the synth.
 
 ## Stage view (visuals)
 
-**V** (or hold pad 5) opens the full-screen stage; **1 / 2 / 3** (or hold pad 2) switch looks:
-Tree Rings, Warp Tunnel, Ink. Chords pour out of the on-screen MPK and drift outward, labelled,
-so you can read your progression back. Each knob has a fixed colour; turning one pops up its
-name and value. **Esc** or holding pad 1 stops everything.
+Opens when you wake the synth (**V** flips to the settings page). Every chord is a band of its
+colour (root on the circle of fifths, tinted by chord type) growing out of the on-screen MPK.
+The bands are made of pixels that ride outward, fan apart and dissolve near the edges. Knobs
+reshape the waves: wobble bends, resonance spikes, chorus doubles, echo leaves ghost edges, drive
+makes pixels bigger and hotter, reverb slows it all down. The kick sends a ripple, the snare
+scatters pixels, the hats make them glitter. **Esc** or holding pad 1 stops everything.
 
 ## Controller setup
 
