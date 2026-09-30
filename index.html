@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VibeSynth</title>
+  <link rel="stylesheet" href="src/style.css">
+</head>
+<body>
+  <header>
+    <h1>VibeSynth <span class="sub">sound tasting menu</span></h1>
+    <div class="status">
+      <span id="midi-status" class="pill">MIDI: not connected</span>
+      <span id="latency" class="pill">Audio: off</span>
+    </div>
+  </header>
+
+  <main>
+    <button id="start" class="start">Click to wake up the synth</button>
+
+    <section>
+      <h2>1 · Pick a sound <small>(click, or use ← → arrow keys)</small></h2>
+      <div id="presets" class="presets"></div>
+    </section>
+
+    <section>
+      <h2>2 · Twist the knobs <small>(K2–K8 on the MPK)</small></h2>
+      <div id="knobs" class="knobs"></div>
+      <p class="hint">Joystick: left/right = pitch bend, up or down = vibrato. No MPK? Play with the computer keys A W S E D F T G Y H U J K.</p>
+    </section>
+
+    <section class="scope-wrap">
+      <canvas id="scope"></canvas>
+    </section>
+
+    <section>
+      <h2>MIDI monitor <small>(what the controller is sending)</small></h2>
+      <pre id="monitor" class="monitor"></pre>
+    </section>
+  </main>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
