@@ -1,7 +1,7 @@
 import { FXChain, makeNoiseBuffer } from './fx.js';
 import { Voice } from './voice.js';
 
-const MAX_VOICES = 16;
+const MAX_VOICES = 28;
 
 export class Engine {
   constructor() {

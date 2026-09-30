@@ -8,8 +8,9 @@
 </head>
 <body>
   <header>
-    <h1>VibeSynth <span class="sub">sound tasting menu</span></h1>
+    <h1>VibeSynth</h1>
     <div class="status">
+      <span id="joy-status" class="pill">Joystick: factory mode (up = down)</span>
       <span id="midi-status" class="pill">MIDI: not connected</span>
       <span id="latency" class="pill">Audio: off</span>
     </div>
@@ -18,25 +19,56 @@
   <main>
     <button id="start" class="start">Click to wake up the synth</button>
 
+    <section class="chord-stage">
+      <div class="mode-switch" role="tablist">
+        <button id="mode-chords" class="active">Chords</button>
+        <button id="mode-notes">Notes</button>
+        <span class="mode-hint">Tab to switch</span>
+      </div>
+
+      <div id="chord-panel" class="chord-panel">
+        <div class="chord-display">
+          <div id="chord-name" class="chord-name">—</div>
+          <div class="chord-sub">press a key · tilt the joystick to colour the chord</div>
+        </div>
+
+        <div id="joy-grid" class="joy-grid"></div>
+
+        <div class="chord-controls">
+          <label>Key
+            <select id="key-tonic"></select>
+            <select id="key-mode"><option value="major">major</option><option value="minor">minor</option></select>
+          </label>
+          <label>Voicing <small>(↑ ↓ keys)</small>
+            <input id="voicing" type="range" min="-12" max="12" step="1" value="0">
+          </label>
+          <label>Strum
+            <input id="strum" type="range" min="0" max="80" step="1" value="18">
+          </label>
+          <label class="check"><input id="bass" type="checkbox" checked> Bass note</label>
+        </div>
+      </div>
+    </section>
+
     <section>
-      <h2>1 · Pick a sound <small>(click, or use ← → arrow keys)</small></h2>
+      <h2>Sound <small>(click, or ← → arrow keys)</small></h2>
       <div id="presets" class="presets"></div>
     </section>
 
     <section>
-      <h2>2 · Twist the knobs <small>(K2–K8 on the MPK)</small></h2>
+      <h2>Knobs <small>(K2–K8 on the MPK)</small></h2>
       <div id="knobs" class="knobs"></div>
-      <p class="hint">Joystick: left/right = pitch bend, up or down = vibrato. No MPK? Play with the computer keys A W S E D F T G Y H U J K.</p>
+      <p class="hint">No MPK? Computer keys A W S E D F T G Y H U J K play notes. In Notes mode the joystick does pitch bend and vibrato.</p>
     </section>
 
     <section class="scope-wrap">
       <canvas id="scope"></canvas>
     </section>
 
-    <section>
-      <h2>MIDI monitor <small>(what the controller is sending)</small></h2>
+    <details>
+      <summary>MIDI monitor</summary>
       <pre id="monitor" class="monitor"></pre>
-    </section>
+    </details>
   </main>
 
   <script type="module" src="src/main.js"></script>

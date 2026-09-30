@@ -70,3 +70,47 @@ main { max-width: 1100px; margin: 0 auto; padding: 20px 28px 60px; display: grid
   background: #0f0b09; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 0;
   height: 160px; overflow: auto; font: 12px/1.45 ui-monospace, monospace; color: #cbb8a7;
 }
+
+/* ---------- Chord stage ---------- */
+
+.chord-stage { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 18px; }
+
+.mode-switch { display: flex; align-items: center; gap: 6px; margin-bottom: 16px; }
+.mode-switch button {
+  font: inherit; font-weight: 600; padding: 6px 16px; border-radius: 99px; cursor: pointer;
+  background: var(--panel-2); color: var(--muted); border: 1px solid var(--line);
+}
+.mode-switch button.active { background: var(--accent); color: #1a110b; border-color: transparent; }
+.mode-hint { color: var(--muted); font-size: 12px; margin-left: 8px; }
+
+.chord-panel { display: grid; grid-template-columns: 1fr auto; grid-template-areas: "display grid" "controls controls"; gap: 18px 28px; align-items: center; transition: opacity 0.2s; }
+.chord-panel.dim { opacity: 0.35; pointer-events: none; }
+
+.chord-display { grid-area: display; text-align: center; }
+.chord-name {
+  font-size: clamp(64px, 11vw, 132px); font-weight: 800; line-height: 1; letter-spacing: -2px;
+  color: var(--muted); opacity: 0.4; transition: color 0.15s, opacity 0.4s, text-shadow 0.15s;
+}
+.chord-name.lit { color: var(--accent); opacity: 1; text-shadow: 0 0 40px color-mix(in srgb, var(--accent) 50%, transparent); }
+.chord-sub { color: var(--muted); font-size: 13px; margin-top: 10px; }
+
+.joy-grid { grid-area: grid; display: grid; grid-template-columns: repeat(3, 92px); gap: 6px; }
+.joy-cell {
+  height: 62px; display: flex; align-items: center; justify-content: center; text-align: center;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px;
+  font-size: 12px; color: var(--muted); padding: 4px; transition: all 0.1s;
+}
+.joy-cell.on { background: var(--accent); color: #1a110b; font-weight: 700; border-color: transparent; }
+
+.chord-controls { grid-area: controls; display: flex; flex-wrap: wrap; gap: 20px; align-items: center; font-size: 13px; color: var(--muted); }
+.chord-controls label { display: flex; align-items: center; gap: 8px; }
+.chord-controls select { font: inherit; background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; }
+.chord-controls input[type=range] { accent-color: var(--accent); width: 120px; }
+.chord-controls input[type=checkbox] { accent-color: var(--accent); }
+
+details summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-bottom: 8px; }
+
+@media (max-width: 720px) {
+  .chord-panel { grid-template-columns: 1fr; grid-template-areas: "display" "grid" "controls"; }
+  .joy-grid { justify-self: center; grid-template-columns: repeat(3, 80px); }
+}

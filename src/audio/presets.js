@@ -3,7 +3,7 @@
 // fm:   two-operator FM (used for keys and bells) instead of oscs
 // filter.env is in cents above the base cutoff; fenv/aenv are ADSR in seconds.
 
-export const PRESETS = [
+export const ALL_PRESETS = [
   {
     id: 'velvet',
     name: 'Velvet Pad',
@@ -70,6 +70,7 @@ export const PRESETS = [
   },
   {
     id: 'glass',
+    retired: true,
     name: 'Glass Bells',
     inspired: 'Yamaha DX7 bells',
     blurb: 'Shimmery, chimey, long tails. Lovely for melodies on top.',
@@ -82,6 +83,7 @@ export const PRESETS = [
   },
   {
     id: 'bladerunner',
+    retired: true,
     name: 'Blade Brass',
     inspired: 'Yamaha CS-80 / Vangelis',
     blurb: 'Swelling brass with a slow filter sweep. Hold chords.',
@@ -98,3 +100,6 @@ export const PRESETS = [
     fx: { drive: 0.15, chorus: 0.55, wobble: 0.05, echo: 0.2, reverb: 0.75 },
   },
 ];
+
+// Glass Bells and Blade Brass didn't make the cut in the first tasting (2026-09-30).
+export const PRESETS = ALL_PRESETS.filter((p) => !p.retired);
