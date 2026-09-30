@@ -42,9 +42,9 @@ vec3 shade(float r, float ang) {
 
     // The wave's own pixel lattice: rows in depth, a fixed number of columns around the arc, so
     // the columns fan apart as the wave grows.
-    float cols = 150.0;
-    float arc = max(r, 1.0) * PI / cols;
-    float rowF = depth / cell, colF = ang / PI * cols;
+    float cols = 300.0; // around the full circle
+    float arc = max(r, 1.0) * 2.0 * PI / cols;
+    float rowF = depth / cell, colF = (ang + PI) / (2.0 * PI) * cols;
     vec2 id = floor(vec2(rowF, colF));
     float h = hash(vec3(id, seeds[i]));
     float h2 = hash(vec3(id.yx, seeds[i] + 7.0));
@@ -91,7 +91,7 @@ void main() {
   // Reverb pulls the camera back: everything shrinks into the distance.
   vec2 d = (frag - origin) / zoom;
   float r = length(d);
-  float ang = atan(max(d.y, 0.0), d.x);
+  float ang = atan(d.y, d.x); // full circle: the waves carry on below and around the deck
   vec3 c;
   if (split > 0.5) {
     // Chorus: each wave splits into a pink and a cyan copy.
