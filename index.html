@@ -51,14 +51,50 @@
       </div>
     </section>
 
-    <section>
-      <h2>Sound <small>(click, or ← → arrow keys)</small></h2>
-      <div id="presets" class="presets"></div>
+    <section id="drum-stage" class="drum-stage">
+      <div class="drum-head">
+        <button id="drum-play" class="drum-play">▶ Play</button>
+        <div class="pattern">
+          <button id="pattern-prev" class="icon">◀</button>
+          <div>
+            <div id="pattern-name" class="pattern-name">Motorik</div>
+            <div id="pattern-feel" class="pattern-feel"></div>
+          </div>
+          <button id="pattern-next" class="icon">▶</button>
+        </div>
+        <div id="sig-buttons" class="sig-buttons"></div>
+        <div class="tempo-box">
+          <span id="tempo" class="tempo">92 bpm</span>
+          <button id="tap" class="small">Tap</button>
+        </div>
+        <button id="drum-fill" class="small">Fill</button>
+        <span class="kit-label">Kit: <b id="kit-name">Dusty</b></span>
+      </div>
+      <div id="drum-grid" class="drum-grid"></div>
+      <div class="drum-foot">
+        <div>
+          <div class="foot-title">Pads · bank A <small>(bank B = play drums live)</small></div>
+          <div id="pad-map" class="pad-map"></div>
+        </div>
+        <p class="hint">Space = play/stop. Turn <b>Busy</b> (drums knob page) to add or strip hits: bright squares play, faint ones are waiting for more Busy.</p>
+      </div>
     </section>
 
     <section>
-      <h2>Knobs <small>(K2–K8 on the MPK)</small></h2>
+      <div class="knob-head">
+        <h2>Knobs</h2>
+        <div class="knob-tabs">
+          <button data-page="sound" class="active">Sound</button>
+          <button data-page="drums">Drums</button>
+        </div>
+        <small class="muted">pad 5 flips pages</small>
+      </div>
       <div id="knobs" class="knobs"></div>
+    </section>
+
+    <section>
+      <h2>Sound <small>(click, or ← → arrow keys)</small></h2>
+      <div id="presets" class="presets"></div>
       <p class="hint">No MPK? Computer keys A W S E D F T G Y H U J K play notes. In Notes mode the joystick does pitch bend and vibrato.</p>
     </section>
 

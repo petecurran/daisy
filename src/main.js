@@ -1,38 +1,127 @@
 import { Engine } from './audio/engine.js';
 import { PRESETS } from './audio/presets.js';
 import { ChordPlayer, NOTE_NAMES, ZONES, ZONE_LABELS, zoneFromXY } from './chords.js';
+import { KITS, PAD_SOUNDS } from './drums/kit.js';
+import { SIGNATURES, Sequencer } from './drums/sequencer.js';
 import { connectMidi } from './midi.js';
 
-// MPK Mini Mk II factory mapping (measured): knobs K1-K8 = CC1-8, joystick X = pitch bend,
-// joystick Y (up AND down) = CC1, colliding with K1. After reprogramming (tools/mpk-setup.py)
-// the joystick sends up = CC17, down = CC16, pads are on channel 10, and K1 is free.
-const KNOBS = [
-  { cc: 2, label: 'Brightness', target: 'macro', key: 'brightness' },
-  { cc: 3, label: 'Resonance', target: 'macro', key: 'resonance' },
-  { cc: 4, label: 'Drive', target: 'fx', key: 'drive' },
-  { cc: 5, label: 'Chorus', target: 'fx', key: 'chorus' },
-  { cc: 6, label: 'Tape wobble', target: 'fx', key: 'wobble' },
-  { cc: 7, label: 'Echo', target: 'fx', key: 'echo' },
-  { cc: 8, label: 'Reverb', target: 'fx', key: 'reverb' },
-];
+// MPK Mini Mk II, as reprogrammed by tools/mpk-setup.py:
+//   knobs K1-K8 = CC1-8, joystick X = pitch bend, joystick up = CC17 / down = CC16,
+//   pads on MIDI channel 10: bank A = notes 44-51 (controls), bank B = notes 32-39 (live drums).
+// On factory settings the joystick sends CC1 for both up and down (and clashes with K1).
 const JOY_UP_CC = 17;
 const JOY_DOWN_CC = 16;
-const VOICING_CC = 1; // K1, only once the joystick no longer uses CC1
-const PAD_CHANNEL = 9; // MIDI channel 10, once the pads are reprogrammed
+const PAD_CHANNEL = 9;
+const PAD_A = 44;
+const PAD_B = 32;
+
+const PAD_ACTIONS = [
+  { label: 'Play / Stop', down: () => seq.toggle() },
+  { label: 'Fill', down: () => seq.playing && seq.queueFill() },
+  { label: '◀ Pattern', down: () => seq.shiftPattern(-1) },
+  { label: 'Pattern ▶', down: () => seq.shiftPattern(1) },
+  { label: 'Knobs: Sound ⇄ Drums', down: () => setKnobPage(knobPage === 'sound' ? 'drums' : 'sound') },
+  { label: 'Tap tempo', down: () => { seq.tap(); engine.syncEcho(seq.bpm); } },
+  { label: 'Break (hold)', down: () => { seq.breakHeld = true; renderDrums(); }, up: () => { seq.breakHeld = false; renderDrums(); } },
+  { label: 'Time signature', down: () => seq.nextSignature() },
+];
 
 const COMPUTER_KEYS = 'awsedftgyhujk';
 
 let engine = null;
 let chords = null;
+let seq = null;
 let presetIndex = 0;
 let mode = 'chords';
-const knobEls = new Map();
-// dual = joystick reprogrammed (up/down on separate CCs). This MPK has been; see tools/mpk-setup.py.
+let knobPage = 'sound';
 const joy = { x: 0, up: 0, down: 0, dual: false, zone: 'C', timer: null };
 
-// ---------- Sound + knob UI ----------
+const $ = (id) => document.getElementById(id);
 
-const presetsEl = document.getElementById('presets');
+// ---------- Knob pages ----------
+
+const fxKnob = (key, label) => ({
+  label, get: () => engine.fx.values[key], set: (v) => engine.fx.set({ [key]: v }),
+});
+const macroKnob = (key, label) => ({
+  label, get: () => engine.macros[key], set: (v) => engine.setMacro(key, v),
+});
+
+const KNOB_PAGES = {
+  sound: [
+    {
+      label: 'Voicing',
+      get: () => (+$('voicing').value + 12) / 24,
+      set: (v) => { $('voicing').value = Math.round(v * 24 - 12); syncChordSettings(); },
+      fmt: () => (+$('voicing').value > 0 ? '+' : '') + $('voicing').value,
+    },
+    macroKnob('brightness', 'Brightness'),
+    macroKnob('resonance', 'Resonance'),
+    fxKnob('drive', 'Drive'),
+    fxKnob('chorus', 'Chorus'),
+    fxKnob('wobble', 'Tape wobble'),
+    fxKnob('echo', 'Echo'),
+    fxKnob('reverb', 'Reverb'),
+  ],
+  drums: [
+    {
+      label: 'Tempo',
+      get: () => (seq.bpm - 50) / 130,
+      set: (v) => { seq.setBpm(50 + v * 130); engine.syncEcho(seq.bpm); },
+      fmt: () => `${seq.bpm} bpm`,
+    },
+    { label: 'Busy', get: () => seq.busy, set: (v) => { seq.busy = v; renderGrid(); } },
+    { label: 'Swing', get: () => seq.swing, set: (v) => { seq.swing = v; } },
+    {
+      label: 'Kit',
+      get: () => engine.drums.kitIndex / (KITS.length - 1),
+      set: (v) => { engine.drums.setKit(Math.min(KITS.length - 1, Math.floor(v * KITS.length))); renderDrums(); },
+      fmt: () => engine.drums.kit.name,
+    },
+    { label: 'Drum tone', get: () => engine.drums.toneAmount, set: (v) => engine.drums.setTone(v) },
+    { label: 'Room', get: () => engine.drums.roomAmount, set: (v) => engine.drums.setRoom(v) },
+    { label: 'Pump', get: () => engine.pump, set: (v) => { engine.pump = v; } },
+    { label: 'Drum level', get: () => engine.drums.level, set: (v) => engine.drums.setLevel(v) },
+  ],
+};
+
+const knobsEl = $('knobs');
+const knobEls = [];
+for (let i = 0; i < 8; i++) {
+  const el = document.createElement('div');
+  el.className = 'knob';
+  el.innerHTML = `<div class="dial"></div><div class="label"></div><div class="val"></div><div class="cc">K${i + 1}</div>`;
+  knobsEl.appendChild(el);
+  knobEls.push(el);
+}
+
+function showKnob(i, flash = true) {
+  const k = KNOB_PAGES[knobPage][i];
+  const el = knobEls[i];
+  el.querySelector('.label').textContent = k.label;
+  const v = engine ? k.get() : 0.5;
+  el.querySelector('.dial').style.setProperty('--rot', `${-135 + v * 270}deg`);
+  el.querySelector('.val').textContent = engine ? (k.fmt ? k.fmt() : `${Math.round(v * 100)}%`) : '';
+  if (!flash) return;
+  el.classList.add('flash');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.remove('flash'), 250);
+}
+
+function renderKnobs() {
+  for (let i = 0; i < 8; i++) showKnob(i, false);
+  document.querySelectorAll('.knob-tabs button').forEach((b) => b.classList.toggle('active', b.dataset.page === knobPage));
+}
+
+function setKnobPage(page) {
+  knobPage = page;
+  renderKnobs();
+}
+document.querySelectorAll('.knob-tabs button').forEach((b) => (b.onclick = () => setKnobPage(b.dataset.page)));
+
+// ---------- Sounds ----------
+
+const presetsEl = $('presets');
 PRESETS.forEach((p, i) => {
   const b = document.createElement('button');
   b.className = 'preset';
@@ -42,30 +131,6 @@ PRESETS.forEach((p, i) => {
   b.onclick = () => { ensureEngine(); selectPreset(i); };
   presetsEl.appendChild(b);
 });
-
-const knobsEl = document.getElementById('knobs');
-for (const k of KNOBS) {
-  const el = document.createElement('div');
-  el.className = 'knob';
-  el.innerHTML = `<div class="dial"></div><div class="label">${k.label}</div><div class="cc">K${k.cc}</div>`;
-  knobsEl.appendChild(el);
-  knobEls.set(k.cc, el);
-}
-
-function showKnob(cc, value01) {
-  const el = knobEls.get(cc);
-  if (!el) return;
-  el.querySelector('.dial').style.setProperty('--rot', `${-135 + value01 * 270}deg`);
-  el.classList.add('flash');
-  clearTimeout(el._t);
-  el._t = setTimeout(() => el.classList.remove('flash'), 250);
-}
-
-function refreshKnobs() {
-  for (const k of KNOBS) {
-    showKnob(k.cc, k.target === 'macro' ? engine.macros[k.key] : engine.fx.values[k.key]);
-  }
-}
 
 function selectPreset(i) {
   presetIndex = (i + PRESETS.length) % PRESETS.length;
@@ -77,13 +142,13 @@ function selectPreset(i) {
   engine.setPreset(PRESETS[presetIndex]);
   engine.setMacro('brightness', 0.5);
   engine.setMacro('resonance', 0.5);
-  refreshKnobs();
+  renderKnobs();
 }
 
-// ---------- Chord UI ----------
+// ---------- Chords ----------
 
-const chordNameEl = document.getElementById('chord-name');
-const joyGridEl = document.getElementById('joy-grid');
+const chordNameEl = $('chord-name');
+const joyGridEl = $('joy-grid');
 for (const row of ZONES) {
   for (const z of row) {
     const cell = document.createElement('div');
@@ -107,21 +172,16 @@ function showChord(name) {
   }
 }
 
-const tonicEl = document.getElementById('key-tonic');
-NOTE_NAMES.forEach((n, i) => tonicEl.add(new Option(n, i)));
-const modeSelEl = document.getElementById('key-mode');
-const voicingEl = document.getElementById('voicing');
-const strumEl = document.getElementById('strum');
-const bassEl = document.getElementById('bass');
+NOTE_NAMES.forEach((n, i) => $('key-tonic').add(new Option(n, i)));
 
 function syncChordSettings() {
   if (!chords) return;
-  chords.key = { tonic: +tonicEl.value, mode: modeSelEl.value };
-  chords.voicing = +voicingEl.value;
-  chords.strumMs = +strumEl.value;
-  chords.bass = bassEl.checked;
+  chords.key = { tonic: +$('key-tonic').value, mode: $('key-mode').value };
+  chords.voicing = +$('voicing').value;
+  chords.strumMs = +$('strum').value;
+  chords.bass = $('bass').checked;
 }
-[tonicEl, modeSelEl, voicingEl, strumEl, bassEl].forEach((el) => el.addEventListener('input', syncChordSettings));
+['key-tonic', 'key-mode', 'voicing', 'strum', 'bass'].forEach((id) => $(id).addEventListener('input', syncChordSettings));
 
 function setMode(m) {
   mode = m;
@@ -129,22 +189,22 @@ function setMode(m) {
   engine?.allOff();
   engine?.pitchBend(0);
   engine?.modWheel(0);
-  document.getElementById('mode-chords').classList.toggle('active', m === 'chords');
-  document.getElementById('mode-notes').classList.toggle('active', m === 'notes');
-  document.getElementById('chord-panel').classList.toggle('dim', m !== 'chords');
+  $('mode-chords').classList.toggle('active', m === 'chords');
+  $('mode-notes').classList.toggle('active', m === 'notes');
+  $('chord-panel').classList.toggle('dim', m !== 'chords');
 }
-document.getElementById('mode-chords').onclick = () => setMode('chords');
-document.getElementById('mode-notes').onclick = () => setMode('notes');
+$('mode-chords').onclick = () => setMode('chords');
+$('mode-notes').onclick = () => setMode('notes');
 
 // Worn key contacts sometimes never send a note-off, leaving a note droning. Esc clears everything.
 function panic() {
   chords?.allOff();
-  if (chords) chords.refs.clear();
+  chords?.refs.clear();
   engine?.allOff();
   engine?.all.forEach((v) => v.done || v.kill());
   showChord(null);
 }
-document.getElementById('panic').onclick = panic;
+$('panic').onclick = panic;
 
 // ---------- Joystick ----------
 
@@ -161,16 +221,122 @@ function updateJoystick() {
 }
 
 function markDualJoystick() {
-  if (joy.dual) return;
   joy.dual = true;
-  const el = document.getElementById('joy-status');
-  el.textContent = 'Joystick: dual CC ✓';
-  el.classList.add('ok');
+  $('joy-status').textContent = 'Joystick: dual CC ✓';
+  $('joy-status').classList.add('ok');
+}
+
+// ---------- Drums ----------
+
+const sigButtons = $('sig-buttons');
+for (const s of SIGNATURES) {
+  const b = document.createElement('button');
+  b.textContent = s.id;
+  b.dataset.sig = s.id;
+  b.onclick = () => { ensureEngine(); seq.setSignature(s.id); };
+  sigButtons.appendChild(b);
+}
+
+const padMapEl = $('pad-map');
+// Physical layout: pads 5-8 on the top row, 1-4 on the bottom.
+for (const i of [4, 5, 6, 7, 0, 1, 2, 3]) {
+  const el = document.createElement('div');
+  el.className = 'pad';
+  el.dataset.pad = i;
+  el.innerHTML = `<span class="num">${i + 1}</span>${PAD_ACTIONS[i].label}`;
+  padMapEl.appendChild(el);
+}
+function flashPad(i, on) {
+  padMapEl.querySelector(`[data-pad="${i}"]`)?.classList.toggle('hit', on);
+}
+
+let gridCells = []; // [track][step] -> element
+let gridPattern = null;
+function renderGrid() {
+  if (!seq) return;
+  const grid = $('drum-grid');
+  if (gridPattern !== seq.pattern) {
+    gridPattern = seq.pattern;
+    grid.innerHTML = '';
+    gridCells = [];
+    const { barSteps, beatSteps } = seq.sig;
+    grid.style.setProperty('--steps', seq.length);
+    for (const [sound, line] of Object.entries(seq.pattern.tracks)) {
+      const label = document.createElement('div');
+      label.className = 'track-label';
+      label.textContent = sound;
+      grid.appendChild(label);
+      const row = [];
+      [...line].forEach((ch, i) => {
+        const c = document.createElement('div');
+        c.className = 'step';
+        if (i % beatSteps === 0) c.classList.add('beat');
+        if (i % barSteps === 0) c.classList.add('bar');
+        c.dataset.d = ch === '.' ? 0 : ch;
+        grid.appendChild(c);
+        row.push(c);
+      });
+      gridCells.push(row);
+    }
+  }
+  const thr = seq.threshold;
+  for (const row of gridCells) {
+    for (const c of row) {
+      const d = +c.dataset.d;
+      c.classList.toggle('on', d > 0 && d >= thr);
+      c.classList.toggle('ghost', d > 0 && d < thr);
+      c.style.setProperty('--level', d / 9);
+    }
+  }
+}
+
+let lastStep = -1;
+function showStep(step) {
+  for (const row of gridCells) {
+    row[lastStep]?.classList.remove('now');
+    row[step]?.classList.add('now');
+  }
+  lastStep = step;
+}
+
+function renderDrums() {
+  if (!seq) return;
+  $('drum-play').textContent = seq.playing ? '■ Stop' : '▶ Play';
+  $('drum-play').classList.toggle('playing', seq.playing);
+  $('pattern-name').textContent = seq.pattern.name;
+  $('pattern-feel').textContent = seq.pattern.feel;
+  $('tempo').textContent = `${seq.bpm} bpm`;
+  $('kit-name').textContent = engine.drums.kit.name;
+  $('drum-fill').classList.toggle('armed', seq.fillQueued || !!seq.fill);
+  $('drum-stage').classList.toggle('breaking', seq.breakHeld);
+  sigButtons.querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.sig === seq.sigId));
+  if (!seq.playing) showStep(-1);
+  renderGrid();
+  if (knobPage === 'drums') renderKnobs();
+}
+
+$('drum-play').onclick = () => { ensureEngine(); seq.toggle(); };
+$('drum-fill').onclick = () => seq?.playing && seq.queueFill();
+$('pattern-prev').onclick = () => { ensureEngine(); seq.shiftPattern(-1); };
+$('pattern-next').onclick = () => { ensureEngine(); seq.shiftPattern(1); };
+$('tap').onclick = () => { ensureEngine(); seq.tap(); engine.syncEcho(seq.bpm); };
+
+function onPad(note, velocity, isDown) {
+  if (!engine) return;
+  if (note >= PAD_A && note < PAD_A + 8) {
+    const i = note - PAD_A;
+    flashPad(i, isDown);
+    const action = PAD_ACTIONS[i];
+    if (isDown) action.down();
+    else action.up?.();
+  } else if (isDown && note >= PAD_B && note < PAD_B + 8) {
+    engine.drums.play(PAD_SOUNDS[note - PAD_B], null, 0.35 + (velocity / 127) * 0.65);
+  }
 }
 
 // ---------- Monitor ----------
 
-const monitorEl = document.getElementById('monitor');
+const monitorEl = $('monitor');
 const monitorLines = [];
 function log(line) {
   monitorLines.push(line);
@@ -183,16 +349,19 @@ function log(line) {
 
 // ---------- Audio ----------
 
-const startBtn = document.getElementById('start');
-startBtn.onclick = () => ensureEngine();
+$('start').onclick = () => ensureEngine();
 
 function ensureEngine() {
   if (!engine) {
     engine = new Engine();
     chords = new ChordPlayer(engine, (name) => showChord(name));
+    seq = new Sequencer(engine.ctx, engine.drums, { onStep: showStep, onState: renderDrums });
+    engine.syncEcho(seq.bpm);
     syncChordSettings();
     selectPreset(presetIndex);
-    startBtn.classList.add('hidden');
+    $('start').classList.add('hidden');
+    document.body.classList.add('awake');
+    renderDrums();
     drawScope();
     setInterval(showLatency, 1000);
   }
@@ -202,9 +371,8 @@ function ensureEngine() {
 
 function showLatency() {
   const { base, output } = engine.latencyMs();
-  const el = document.getElementById('latency');
-  el.textContent = `Audio latency ≈ ${(base + output).toFixed(0)} ms`;
-  el.classList.add('ok');
+  $('latency').textContent = `Audio latency ≈ ${(base + output).toFixed(0)} ms`;
+  $('latency').classList.add('ok');
 }
 
 // ---------- Inputs ----------
@@ -229,10 +397,9 @@ function keyUp(n) {
 
 connectMidi({
   onDevices(names) {
-    const el = document.getElementById('midi-status');
     const mpk = names.find((n) => /mpk/i.test(n));
-    el.textContent = names.length ? `MIDI: ${mpk || names.join(', ')}` : 'MIDI: no devices';
-    el.classList.toggle('ok', names.length > 0);
+    $('midi-status').textContent = names.length ? `MIDI: ${mpk || names.join(', ')}` : 'MIDI: no devices';
+    $('midi-status').classList.toggle('ok', names.length > 0);
   },
   onRaw({ type, channel, d1, d2 }) {
     const kind = { 0x80: 'note off', 0x90: 'note on ', 0xb0: 'CC      ', 0xe0: 'bend    ' }[type] || type.toString(16);
@@ -240,12 +407,12 @@ connectMidi({
     else log(`${kind} ch${channel + 1}  ${d1.toString().padStart(3)}  ${d2}`);
   },
   onNoteOn(n, v, ch) {
-    if (ch === PAD_CHANNEL) return; // pads: reserved for drums
-    keyDown(n, v);
+    if (ch === PAD_CHANNEL) onPad(n, v, true);
+    else keyDown(n, v);
   },
   onNoteOff(n, ch) {
-    if (ch === PAD_CHANNEL) return;
-    keyUp(n);
+    if (ch === PAD_CHANNEL) onPad(n, 0, false);
+    else keyUp(n);
   },
   onPitchBend(amt) {
     joy.x = amt;
@@ -255,32 +422,17 @@ connectMidi({
   onCC(cc, value) {
     const v = value / 127;
     if (cc === JOY_UP_CC || cc === JOY_DOWN_CC) {
-      markDualJoystick();
       if (cc === JOY_UP_CC) joy.up = v; else joy.down = v;
       if (mode === 'chords') updateJoystick();
       else engine?.modWheel(Math.max(joy.up, joy.down));
       return;
     }
-    if (cc === 1 && !joy.dual) {
-      joy.up = v;
-      if (mode === 'chords') updateJoystick();
-      else engine?.modWheel(v);
-      return;
-    }
-    if (cc === VOICING_CC && joy.dual) {
-      voicingEl.value = Math.round(v * 24 - 12);
-      syncChordSettings();
-      return;
-    }
-    if (!engine) return;
-    const k = KNOBS.find((k) => k.cc === cc);
-    if (!k) return;
-    if (k.target === 'macro') engine.setMacro(k.key, v);
-    else engine.fx.set({ [k.key]: v });
-    showKnob(cc, v);
+    if (!engine || cc < 1 || cc > 8) return;
+    KNOB_PAGES[knobPage][cc - 1].set(v);
+    showKnob(cc - 1);
   },
 }).catch((err) => {
-  document.getElementById('midi-status').textContent = `MIDI: ${err.message}`;
+  $('midi-status').textContent = `MIDI: ${err.message}`;
 });
 
 const heldKeys = new Set();
@@ -288,12 +440,14 @@ window.addEventListener('keydown', (e) => {
   if (e.target.tagName === 'SELECT' || e.target.tagName === 'INPUT') return;
   if (e.key === 'Escape') return panic();
   if (e.key === 'Tab') { e.preventDefault(); return setMode(mode === 'chords' ? 'notes' : 'chords'); }
+  if (e.key === ' ') { e.preventDefault(); ensureEngine(); return seq.toggle(); }
   if (e.key === 'ArrowRight') return selectPreset(presetIndex + 1);
   if (e.key === 'ArrowLeft') return selectPreset(presetIndex - 1);
   if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
     e.preventDefault();
-    voicingEl.value = +voicingEl.value + (e.key === 'ArrowUp' ? 1 : -1);
-    return syncChordSettings();
+    $('voicing').value = +$('voicing').value + (e.key === 'ArrowUp' ? 1 : -1);
+    syncChordSettings();
+    return knobPage === 'sound' && showKnob(0, false);
   }
   const i = COMPUTER_KEYS.indexOf(e.key.toLowerCase());
   if (i < 0 || e.repeat || heldKeys.has(i)) return;
@@ -311,7 +465,7 @@ window.addEventListener('keyup', (e) => {
 // ---------- Scope (a first taste of visuals) ----------
 
 function drawScope() {
-  const canvas = document.getElementById('scope');
+  const canvas = $('scope');
   const g = canvas.getContext('2d');
   const an = engine.fx.analyser;
   const buf = new Float32Array(an.fftSize);
@@ -343,3 +497,4 @@ function drawScope() {
 selectPreset(0);
 showZone('C');
 markDualJoystick();
+renderKnobs();
