@@ -3,6 +3,7 @@ import { PRESETS } from './audio/presets.js';
 import { ChordPlayer, NOTE_NAMES, ZONES, ZONE_LABELS, zoneFromXY } from './chords.js';
 import { KITS, PAD_SOUNDS } from './drums/kit.js';
 import { SIGNATURES, Sequencer } from './drums/sequencer.js';
+import { MidiClock } from './drums/clock.js';
 import { connectMidi } from './midi.js';
 
 // MPK Mini Mk II, as reprogrammed by tools/mpk-setup.py:
@@ -31,6 +32,8 @@ const COMPUTER_KEYS = 'awsedftgyhujk';
 let engine = null;
 let chords = null;
 let seq = null;
+let clock = null;
+let midiOut = null;
 let presetIndex = 0;
 let mode = 'chords';
 let knobPage = 'sound';
@@ -357,6 +360,9 @@ function ensureEngine() {
     chords = new ChordPlayer(engine, (name) => showChord(name));
     seq = new Sequencer(engine.ctx, engine.drums, { onStep: showStep, onState: renderDrums });
     engine.syncEcho(seq.bpm);
+    clock = new MidiClock(engine.ctx, () => seq.bpm);
+    clock.setOutput(midiOut);
+    seq.onStart = (t) => clock.align(t); // arp locks to the drum grid
     syncChordSettings();
     selectPreset(presetIndex);
     $('start').classList.add('hidden');
@@ -400,6 +406,10 @@ connectMidi({
     const mpk = names.find((n) => /mpk/i.test(n));
     $('midi-status').textContent = names.length ? `MIDI: ${mpk || names.join(', ')}` : 'MIDI: no devices';
     $('midi-status').classList.toggle('ok', names.length > 0);
+  },
+  onOutputs(outputs) {
+    midiOut = outputs.find((o) => /mpk/i.test(o.name)) || null;
+    clock?.setOutput(midiOut);
   },
   onRaw({ type, channel, d1, d2 }) {
     const kind = { 0x80: 'note off', 0x90: 'note on ', 0xb0: 'CC      ', 0xe0: 'bend    ' }[type] || type.toString(16);

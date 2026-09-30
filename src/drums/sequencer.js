@@ -57,6 +57,7 @@ export class Sequencer {
     this.playing = true;
     this.step = 0;
     this.nextTime = this.ctx.currentTime + 0.06;
+    this.onStart?.(this.nextTime);
     this.timer = setInterval(() => this.tick(), TICK_MS);
     this.tick();
     this.onState?.();

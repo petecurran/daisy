@@ -6,6 +6,7 @@ export async function connectMidi(handlers) {
 
   const attach = () => {
     const names = [];
+    handlers.onOutputs?.([...access.outputs.values()]);
     for (const input of access.inputs.values()) {
       input.onmidimessage = (e) => handle(e.data, input.name);
       names.push(input.name);

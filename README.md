@@ -21,11 +21,13 @@ Open http://localhost:5173 in Chromium, allow MIDI, click to wake the synth.
 ## Controller setup
 
 On factory settings the joystick sends CC1 for both up and down (and K1 also sends CC1).
-This reprograms Program 1 so up = CC17, down = CC16 and pads use MIDI channel 10:
+This reprograms Program 1 so up = CC17, down = CC16, pads use MIDI channel 10, and the
+arpeggiator / note repeat follow the MIDI clock the page sends (locked to the drum tempo):
 
 ```bash
 python3 tools/mpk-setup.py
 ```
 
 `python3 tools/mpk-setup.py --restore` writes back the original settings saved in
-`tools/mpk-backup-factory.txt`. Once reprogrammed, K1 controls chord voicing.
+`tools/mpk-backup-factory.txt`. Once reprogrammed, K1 controls chord voicing. Note the
+arpeggiator only runs while the VibeSynth page is open (it needs the page's clock).
