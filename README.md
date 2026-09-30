@@ -32,8 +32,8 @@ Open http://localhost:5173 in Chromium, allow MIDI, click to wake the synth.
 Opens when you wake the synth (**V** flips to the settings page). Every chord is a band of its
 colour (root on the circle of fifths, tinted by chord type) growing out of the on-screen MPK.
 The bands are made of pixels that ride outward, fan apart and dissolve near the edges. Knobs
-reshape the waves: wobble bends, resonance spikes, chorus doubles, echo leaves ghost edges, drive
-makes pixels bigger and hotter, reverb slows it all down. The kick sends a ripple, the snare
+reshape the waves: wobble bends, resonance makes the edges ring, chorus doubles, echo leaves ghost
+edges, drive turns it grungy (dark, gritty, glitching, hot pink), reverb pulls the camera back. The kick sends a ripple, the snare
 scatters pixels, the hats make them glitter. **Esc** or holding pad 1 stops everything.
 
 ## Controller setup

@@ -2,8 +2,9 @@
 // grows out of the keyboard and fills back to the chord before it, so the screen is mostly colour.
 // Each band is made of its own pixels: they ride outward with the wave and fan apart as it grows,
 // and near the edges of the screen they scatter and drop out, so waves dissolve into dust.
-// Knobs reshape the waves: wobble bends, resonance spikes, chorus doubles, echo leaves ghost
-// edges, drive makes the pixels bigger and hotter, reverb slows everything down.
+// Knobs reshape the waves: wobble bends, resonance makes the edges ring, chorus doubles, echo
+// leaves ghost edges, drive turns it grungy (dark, gritty, glitching), reverb pulls the camera
+// back into the distance.
 
 const MAX = 32;
 
@@ -16,18 +17,16 @@ uniform vec3 colors[MAX];
 uniform float alive[MAX];     // 1 while held, fading after release
 uniform float seeds[MAX];
 uniform float sparkle[MAX];   // extra glitter for colourful chords (9ths etc.)
-uniform vec2 origin;
+uniform vec2 origin, res;
 uniform float maxR;
-uniform float time, pulse, ripple, rippleAmp, shimmer, scatter, wobble, spikes, split, echoGap, echo, cell, heat, exposure;
+uniform float time, pulse, ripple, rippleAmp, shimmer, scatter, wobble, ringing, split, echoGap, echo, cell, heat, exposure, zoom, reverb, dpr;
 
 float hash(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
 
-// The wave's edge, bent by the knobs.
+// The wave's edge, bent by tape wobble.
 float shapeOffset(float ang, float seed) {
-  float w = sin(ang * 6.0 + time * 2.3 + seed) * wobble * 22.0
-          + sin(ang * 13.0 - time * 1.7 + seed * 2.0) * wobble * 7.0;
-  float s = pow(abs(sin(ang * 18.0 + seed)), 10.0) * spikes * 38.0;
-  return w + s;
+  return sin(ang * 6.0 + time * 2.3 + seed) * wobble * 22.0
+       + sin(ang * 13.0 - time * 1.7 + seed * 2.0) * wobble * 7.0;
 }
 
 vec3 shade(float r, float ang) {
@@ -62,8 +61,13 @@ vec3 shade(float r, float ang) {
 
     // A soft wash of the band's colour behind its pixels, so the screen reads as colour.
     c += col * 0.16 * (1.0 - age * 0.8);
-    // Bright leading edge, and echo: ghost edges trailing behind it.
-    c += col * 0.9 * smoothstep(cell * 1.6, 0.0, depth);
+    // Bright leading edge; resonance makes it ring, with faint lines just behind it.
+    c += col * (0.7 + ringing * 0.8) * smoothstep(cell * (1.6 - ringing * 0.8), 0.0, depth);
+    if (ringing > 0.0) {
+      float rg = cell * 1.3;
+      c += col * ringing * 0.5 * (smoothstep(1.2, 0.0, abs(depth - rg * 1.5)) + 0.5 * smoothstep(1.2, 0.0, abs(depth - rg * 3.0)));
+    }
+    // Echo: ghost edges trailing behind it.
     if (echo > 0.0) {
       float k = depth / echoGap;
       float ghost = smoothstep(0.08, 0.0, abs(fract(k) - 0.02)) * step(1.0, k) * step(k, 4.0);
@@ -77,7 +81,15 @@ vec3 shade(float r, float ang) {
 }
 
 void main() {
-  vec2 d = gl_FragCoord.xy - origin;
+  vec2 frag = gl_FragCoord.xy;
+  // Drive, at the top end: horizontal glitch tears, jumping with the kick.
+  float band = floor(frag.y / (14.0 * dpr));
+  float tear = hash(vec3(band, floor(time * 9.0), 3.0));
+  float grunge = smoothstep(0.35, 1.0, heat);
+  frag.x += step(1.0 - grunge * 0.35 - pulse * 0.1, tear) * (hash(vec3(band, time, 1.0)) - 0.5) * 90.0 * dpr * grunge;
+
+  // Reverb pulls the camera back: everything shrinks into the distance.
+  vec2 d = (frag - origin) / zoom;
   float r = length(d);
   float ang = atan(max(d.y, 0.0), d.x);
   vec3 c;
@@ -88,10 +100,28 @@ void main() {
   } else {
     c = shade(r, ang);
   }
-  c = vec3(1.0) - exp(-c * exposure * (1.0 + heat * 0.8) * (1.0 + pulse * 0.3));
+  c = vec3(1.0) - exp(-c * exposure * (1.0 + pulse * 0.3));
   float luma = dot(c, vec3(0.299, 0.587, 0.114));
-  c = max(vec3(0.0), mix(vec3(luma), c, 1.15 + heat * 0.9)); // drive: hotter colour
-  o = vec4(vec3(0.051, 0.055, 0.086) + c, 1.0);
+  c = max(vec3(0.0), mix(vec3(luma), c, 1.15 + heat * 0.4));
+
+  // Distance haze: thicker the further away (reverb) and the further out.
+  vec3 haze = vec3(0.09, 0.07, 0.16);
+  c = mix(c, haze + c * 0.35, reverb * (0.25 + 0.55 * clamp(r / 1400.0, 0.0, 1.0)));
+
+  // Drive: Hotline Miami grunge. Crushed shadows, hot pink/magenta grade, fewer colours,
+  // grain and a dark vignette.
+  if (heat > 0.02) {
+    c = pow(c, vec3(1.0 + heat * 1.3));
+    float l2 = dot(c, vec3(0.299, 0.587, 0.114));
+    c = mix(c, l2 * vec3(2.2, 0.45, 1.35), heat * 0.6); // pulled towards hot pink / magenta
+    c *= mix(vec3(1.0), vec3(1.25, 0.6, 1.0), heat * 0.6);
+    float levels = mix(24.0, 4.0, heat);
+    c = floor(c * levels + 0.5) / levels;
+    c += (hash(vec3(frag, floor(time * 24.0))) - 0.5) * 0.16 * heat;
+    vec2 uv = gl_FragCoord.xy / res - 0.5;
+    c *= 1.0 - heat * 0.75 * smoothstep(0.25, 0.75, length(uv * vec2(1.0, 1.3)));
+  }
+  o = vec4(vec3(0.051, 0.055, 0.086) + max(c, 0.0), 1.0);
 }`;
 
 export class Rings {
@@ -147,13 +177,17 @@ export class Rings {
     gl.uniform1f(u.shimmer, fx.shimmer);
     gl.uniform1f(u.scatter, this.scatter);
     gl.uniform1f(u.wobble, fx.wobble * d);
-    gl.uniform1f(u.spikes, Math.max(0, fx.resonance - 0.5) * 2 * d);
+    gl.uniform1f(u.ringing, Math.max(0, fx.resonance - 0.4) / 0.6);
     gl.uniform1f(u.split, fx.split * 9 * d);
     gl.uniform1f(u.echo, fx.echo);
     gl.uniform1f(u.echoGap, Math.max(8 * d, fx.echoGap));
-    gl.uniform1f(u.cell, fx.cell * (1 + fx.heat * 1.2));
+    gl.uniform1f(u.cell, fx.cell * (1 + fx.heat * 2)); // drive: chunkier pixels
     gl.uniform1f(u.heat, fx.heat);
     gl.uniform1f(u.exposure, fx.exposure);
+    gl.uniform1f(u.zoom, 1 - fx.reverb * 0.45);
+    gl.uniform1f(u.reverb, fx.reverb);
+    gl.uniform1f(u.dpr, d);
+    gl.uniform2f(u.res, gl.drawingBufferWidth, gl.drawingBufferHeight);
     blit(null);
   }
 }

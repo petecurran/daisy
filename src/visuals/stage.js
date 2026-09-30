@@ -195,7 +195,7 @@ export class Stage {
 
   // Newest chord first; each band runs from the previous (newer) chord's edge to its own.
   ringList(now, fx) {
-    const history = 12 + fx.reverb * 12; // reverb: slower waves that linger
+    const history = 12 + fx.reverb * 5; // reverb: slower waves that linger (and the camera pulls back)
     const speed = this.maxR / history;
     fx.echoGap = this.src.engine.fx.echoDelay.delayTime.value * speed; // echo ghosts, one delay apart
     fx.maxR = this.maxR;
