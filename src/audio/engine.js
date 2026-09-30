@@ -1,6 +1,7 @@
 import { FXChain, makeNoiseBuffer } from './fx.js';
 import { Voice } from './voice.js';
 import { DrumKit } from '../drums/kit.js';
+import { bus } from '../bus.js';
 
 const MAX_VOICES = 28;
 
@@ -55,6 +56,7 @@ export class Engine {
     this.voices.set(note, v);
     this.all.push(v);
     this.onLiveOn?.(note, velocity);
+    bus.emit('note', { note, vel: velocity, preset: this.preset, loop: false });
   }
 
   // A note with a known start and length, in any preset: used by looper playback.
@@ -69,6 +71,8 @@ export class Engine {
     v.loopEnd = start + duration;
     this.all.push(v);
     this.loopVoices.push(v);
+    bus.emitAt(this.ctx, start, 'note', { note, vel: velocity, preset, loop: true });
+    bus.emitAt(this.ctx, start + duration, 'noteoff', { note, loop: true });
   }
 
   stopLoopVoices() {
@@ -82,6 +86,7 @@ export class Engine {
     this.voices.delete(note);
     v.release(Math.pow(4, (this.macros.release - 0.5) * 2));
     this.onLiveOff?.(note);
+    bus.emit('noteoff', { note });
   }
 
   allOff() {

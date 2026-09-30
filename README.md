@@ -23,6 +23,13 @@ Open http://localhost:5173 in Chromium, allow MIDI, click to wake the synth.
   hold = undo last layer (clear when stopped). Notes snap to 16ths; each layer keeps its own sound.
 - **← →** change sound, **↑ ↓** voicing.
 
+## Stage view (visuals)
+
+**V** (or hold pad 5) opens the full-screen stage; **1 / 2 / 3** (or hold pad 2) switch looks:
+Tree Rings, Warp Tunnel, Ink. Chords pour out of the on-screen MPK and drift outward, labelled,
+so you can read your progression back. Each knob has a fixed colour; turning one pops up its
+name and value. **Esc** or holding pad 1 stops everything.
+
 ## Controller setup
 
 On factory settings the joystick sends CC1 for both up and down (and K1 also sends CC1).

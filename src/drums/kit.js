@@ -1,3 +1,5 @@
+import { bus } from '../bus.js';
+
 // Synthesised drum kits. Every hit builds a few throwaway nodes, scheduled at an exact audio time.
 
 export const KITS = [
@@ -87,7 +89,10 @@ export class DrumKit {
 
   play(sound, t, vel = 1, opts = {}) {
     const fn = this[sound];
-    if (fn) fn.call(this, t ?? this.ctx.currentTime, vel, opts);
+    if (!fn) return;
+    const at = t ?? this.ctx.currentTime;
+    fn.call(this, at, vel, opts);
+    bus.emitAt(this.ctx, at, 'drum', { sound, vel });
   }
 
   // ---- helpers ----

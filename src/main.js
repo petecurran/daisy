@@ -6,6 +6,8 @@ import { SIGNATURES, Sequencer } from './drums/sequencer.js';
 import { MidiClock } from './drums/clock.js';
 import { connectMidi } from './midi.js';
 import { Looper } from './looper.js';
+import { bus } from './bus.js';
+import { Stage } from './visuals/stage.js';
 
 // MPK Mini Mk II, as reprogrammed by tools/mpk-setup.py:
 //   knobs K1-K8 = CC1-8, joystick X = pitch bend, joystick up = CC17 / down = CC16,
@@ -19,11 +21,11 @@ const PAD_B = 32;
 
 // Each pad: `down`/`up` fire instantly; `tap`/`hold` wait to see how long the pad is held.
 const PAD_ACTIONS = [
-  { label: 'Play / Stop drums', down: () => toggleDrums() },
-  { label: 'Fill', down: () => seq.playing && seq.queueFill() },
+  { label: 'Play / Stop drums', sub: 'hold: stop everything', tap: () => toggleDrums(), hold: () => stopEverything() },
+  { label: 'Fill', sub: 'hold: next look', tap: () => seq.playing && seq.queueFill(), hold: () => (stage.visible ? stage.nextMode() : stage.show(true)) },
   { label: '◀ Pattern', sub: 'hold: time sig', tap: () => seq.shiftPattern(-1), hold: () => seq.shiftSignature(-1) },
   { label: 'Pattern ▶', sub: 'hold: time sig', tap: () => seq.shiftPattern(1), hold: () => seq.shiftSignature(1) },
-  { label: 'Knobs: Sound ⇄ Drums', down: () => setKnobPage(knobPage === 'sound' ? 'drums' : 'sound') },
+  { label: 'Knobs: Sound ⇄ Drums', sub: 'hold: stage view', tap: () => setKnobPage(knobPage === 'sound' ? 'drums' : 'sound'), hold: () => stage.show() },
   { label: 'Tap tempo', down: () => { seq.tap(); engine.syncEcho(seq.bpm); } },
   { label: 'Break (hold)', down: () => { seq.breakHeld = true; renderDrums(); }, up: () => { seq.breakHeld = false; renderDrums(); } },
   { label: 'Looper', sub: 'tap · 2×tap stop · hold undo', down: () => looper.padDown(), up: () => looper.padUp() },
@@ -37,6 +39,7 @@ let chords = null;
 let seq = null;
 let clock = null;
 let looper = null;
+let stage = null;
 let midiOut = null;
 let presetIndex = 0;
 let mode = 'chords';
@@ -171,6 +174,8 @@ function showZone(zone) {
 }
 
 function showChord(name) {
+  const keys = chords ? [...chords.held.keys()] : [];
+  bus.emit('chord', { name, root: keys.length ? keys[keys.length - 1] : null });
   if (name) {
     chordNameEl.textContent = name;
     chordNameEl.classList.add('lit');
@@ -205,6 +210,7 @@ $('mode-notes').onclick = () => setMode('notes');
 
 // Worn key contacts sometimes never send a note-off, leaving a note droning. Esc clears everything.
 function panic() {
+  stopEverything();
   chords?.allOff();
   chords?.refs.clear();
   engine?.allOff();
@@ -300,6 +306,7 @@ function renderGrid() {
 
 let lastStep = -1;
 function showStep(step, inBar, globalStep) {
+  if (seq && step >= 0) bus.emit('step', { inBar, barSteps: seq.sig.barSteps, beatSteps: seq.sig.beatSteps, global: globalStep });
   if (looper?.hasLoop && globalStep >= looper.start) {
     const pos = (globalStep - looper.start) % looper.length;
     $('loop-progress').style.width = `${((pos + 1) / looper.length) * 100}%`;
@@ -328,6 +335,13 @@ function renderDrums() {
   if (knobPage === 'drums') renderKnobs();
 }
 
+// Drums, loop playback and every sounding note: all off.
+function stopEverything() {
+  if (looper?.hasLoop && looper.state !== 'stopped') looper.stop();
+  seq?.stop();
+  renderDrums();
+}
+
 // With a loop going, the transport has to keep running, so Play/Stop just mutes the drums.
 function toggleDrums() {
   if (looper.hasLoop && seq.playing) {
@@ -348,6 +362,7 @@ function onPad(note, velocity, isDown) {
   if (note >= PAD_A && note < PAD_A + 8) {
     const i = note - PAD_A;
     flashPad(i, isDown);
+    bus.emit('pad', { index: i, down: isDown });
     const action = PAD_ACTIONS[i];
     if (action.tap) {
       if (isDown) {
@@ -430,6 +445,7 @@ function log(line) {
 // ---------- Audio ----------
 
 $('start').onclick = () => ensureEngine();
+$('stage-btn').onclick = () => { ensureEngine(); stage.show(true); };
 
 function ensureEngine() {
   if (!engine) {
@@ -442,7 +458,12 @@ function ensureEngine() {
     seq.onStart = (t) => clock.align(t); // arp locks to the drum grid
     looper = new Looper(engine, seq, { onState: renderLooper });
     seq.onSchedule = (step, t) => looper.onSchedule(step, t);
-    window.vibesynth = { engine, seq, looper, chords }; // handy in the devtools console
+    stage = new Stage($('stage'), {
+      engine, seq, looper, chords, joy,
+      knobs: () => KNOB_PAGES[knobPage],
+      page: () => knobPage,
+    });
+    window.vibesynth = { engine, seq, looper, chords, stage }; // handy in the devtools console
     syncChordSettings();
     selectPreset(presetIndex);
     $('start').classList.add('hidden');
@@ -520,6 +541,7 @@ connectMidi({
     if (!engine || cc < 1 || cc > 8) return;
     KNOB_PAGES[knobPage][cc - 1].set(v);
     showKnob(cc - 1);
+    bus.emit('knob', { index: cc - 1, page: knobPage, value: v });
   },
 }).catch((err) => {
   $('midi-status').textContent = `MIDI: ${err.message}`;
@@ -533,6 +555,8 @@ window.addEventListener('keydown', (e) => {
     if (!e.repeat) { ensureEngine(); looper.padDown(); }
     return;
   }
+  if (e.key.toLowerCase() === 'v') { ensureEngine(); return stage.show(); }
+  if (stage?.visible && ['1', '2', '3'].includes(e.key)) return stage.nextMode(+e.key - 1 - stage.mode);
   if (e.key === 'Tab') { e.preventDefault(); return setMode(mode === 'chords' ? 'notes' : 'chords'); }
   if (e.key === ' ') { e.preventDefault(); ensureEngine(); return seq.toggle(); }
   if (e.key === 'ArrowRight') return selectPreset(presetIndex + 1);
