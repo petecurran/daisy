@@ -4,8 +4,8 @@ import { ChordPlayer, NOTE_NAMES, ZONES, ZONE_LABELS, zoneFromXY } from './chord
 import { connectMidi } from './midi.js';
 
 // MPK Mini Mk II factory mapping (measured): knobs K1-K8 = CC1-8, joystick X = pitch bend,
-// joystick Y (up AND down) = CC1, colliding with K1. Once the joystick is reprogrammed to
-// "Dual CC" (up = CC16, down = CC17, see README) we can tell up from down and K1 is free.
+// joystick Y (up AND down) = CC1, colliding with K1. After reprogramming (tools/mpk-setup.py)
+// the joystick sends up = CC17, down = CC16, pads are on channel 10, and K1 is free.
 const KNOBS = [
   { cc: 2, label: 'Brightness', target: 'macro', key: 'brightness' },
   { cc: 3, label: 'Resonance', target: 'macro', key: 'resonance' },
@@ -15,8 +15,9 @@ const KNOBS = [
   { cc: 7, label: 'Echo', target: 'fx', key: 'echo' },
   { cc: 8, label: 'Reverb', target: 'fx', key: 'reverb' },
 ];
-const JOY_UP_CC = 16;
-const JOY_DOWN_CC = 17;
+const JOY_UP_CC = 17;
+const JOY_DOWN_CC = 16;
+const VOICING_CC = 1; // K1, only once the joystick no longer uses CC1
 const PAD_CHANNEL = 9; // MIDI channel 10, once the pads are reprogrammed
 
 const COMPUTER_KEYS = 'awsedftgyhujk';
@@ -26,6 +27,7 @@ let chords = null;
 let presetIndex = 0;
 let mode = 'chords';
 const knobEls = new Map();
+// dual = joystick reprogrammed (up/down on separate CCs). This MPK has been; see tools/mpk-setup.py.
 const joy = { x: 0, up: 0, down: 0, dual: false, zone: 'C', timer: null };
 
 // ---------- Sound + knob UI ----------
@@ -265,6 +267,11 @@ connectMidi({
       else engine?.modWheel(v);
       return;
     }
+    if (cc === VOICING_CC && joy.dual) {
+      voicingEl.value = Math.round(v * 24 - 12);
+      syncChordSettings();
+      return;
+    }
     if (!engine) return;
     const k = KNOBS.find((k) => k.cc === cc);
     if (!k) return;
@@ -335,3 +342,4 @@ function drawScope() {
 
 selectPreset(0);
 showZone('C');
+markDualJoystick();

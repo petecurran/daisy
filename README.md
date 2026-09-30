@@ -18,14 +18,14 @@ Open http://localhost:5173 in Chromium, allow MIDI, click to wake the synth.
 - **K2–K8**: Brightness, Resonance, Drive, Chorus, Tape wobble, Echo, Reverb.
 - **← →** change sound, **↑ ↓** voicing.
 
-## Controller setup (recommended)
+## Controller setup
 
-On factory settings the joystick sends the same CC1 for up and down. Using
-[SysEx Controls](https://github.com/soyersoyer/sysex-controls) (`yay -S sysex-controls`):
+On factory settings the joystick sends CC1 for both up and down (and K1 also sends CC1).
+This reprograms Program 1 so up = CC17, down = CC16 and pads use MIDI channel 10:
 
-1. Joystick → Vertical → **Dual CC**, CCs **16** (up) and **17** (down).
-2. Pads (banks A and B) → MIDI channel **10**.
-3. Send to the active program.
+```bash
+python3 tools/mpk-setup.py
+```
 
-The page detects dual-CC automatically ("Joystick: dual CC ✓"). If up/down come out
-reversed, swap the two CC numbers.
+`python3 tools/mpk-setup.py --restore` writes back the original settings saved in
+`tools/mpk-backup-factory.txt`. Once reprogrammed, K1 controls chord voicing.
