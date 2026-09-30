@@ -5,6 +5,7 @@ import { KITS, PAD_SOUNDS } from './drums/kit.js';
 import { SIGNATURES, Sequencer } from './drums/sequencer.js';
 import { MidiClock } from './drums/clock.js';
 import { connectMidi } from './midi.js';
+import { Looper } from './looper.js';
 
 // MPK Mini Mk II, as reprogrammed by tools/mpk-setup.py:
 //   knobs K1-K8 = CC1-8, joystick X = pitch bend, joystick up = CC17 / down = CC16,
@@ -16,16 +17,18 @@ const PAD_CHANNEL = 9;
 const PAD_A = 44;
 const PAD_B = 32;
 
+// Each pad: `down`/`up` fire instantly; `tap`/`hold` wait to see how long the pad is held.
 const PAD_ACTIONS = [
-  { label: 'Play / Stop', down: () => seq.toggle() },
+  { label: 'Play / Stop drums', down: () => toggleDrums() },
   { label: 'Fill', down: () => seq.playing && seq.queueFill() },
-  { label: '◀ Pattern', down: () => seq.shiftPattern(-1) },
-  { label: 'Pattern ▶', down: () => seq.shiftPattern(1) },
+  { label: '◀ Pattern', sub: 'hold: time sig', tap: () => seq.shiftPattern(-1), hold: () => seq.shiftSignature(-1) },
+  { label: 'Pattern ▶', sub: 'hold: time sig', tap: () => seq.shiftPattern(1), hold: () => seq.shiftSignature(1) },
   { label: 'Knobs: Sound ⇄ Drums', down: () => setKnobPage(knobPage === 'sound' ? 'drums' : 'sound') },
   { label: 'Tap tempo', down: () => { seq.tap(); engine.syncEcho(seq.bpm); } },
   { label: 'Break (hold)', down: () => { seq.breakHeld = true; renderDrums(); }, up: () => { seq.breakHeld = false; renderDrums(); } },
-  { label: 'Time signature', down: () => seq.nextSignature() },
+  { label: 'Looper', sub: 'tap · 2×tap stop · hold undo', down: () => looper.padDown(), up: () => looper.padUp() },
 ];
+const HOLD_MS = 500;
 
 const COMPUTER_KEYS = 'awsedftgyhujk';
 
@@ -33,6 +36,7 @@ let engine = null;
 let chords = null;
 let seq = null;
 let clock = null;
+let looper = null;
 let midiOut = null;
 let presetIndex = 0;
 let mode = 'chords';
@@ -246,7 +250,8 @@ for (const i of [4, 5, 6, 7, 0, 1, 2, 3]) {
   const el = document.createElement('div');
   el.className = 'pad';
   el.dataset.pad = i;
-  el.innerHTML = `<span class="num">${i + 1}</span>${PAD_ACTIONS[i].label}`;
+  const a = PAD_ACTIONS[i];
+  el.innerHTML = `<span class="num">${i + 1}</span>${a.label}${a.sub ? `<span class="sub">${a.sub}</span>` : ''}`;
   padMapEl.appendChild(el);
 }
 function flashPad(i, on) {
@@ -294,7 +299,11 @@ function renderGrid() {
 }
 
 let lastStep = -1;
-function showStep(step) {
+function showStep(step, inBar, globalStep) {
+  if (looper?.hasLoop && globalStep >= looper.start) {
+    const pos = (globalStep - looper.start) % looper.length;
+    $('loop-progress').style.width = `${((pos + 1) / looper.length) * 100}%`;
+  }
   for (const row of gridCells) {
     row[lastStep]?.classList.remove('now');
     row[step]?.classList.add('now');
@@ -304,8 +313,9 @@ function showStep(step) {
 
 function renderDrums() {
   if (!seq) return;
-  $('drum-play').textContent = seq.playing ? '■ Stop' : '▶ Play';
-  $('drum-play').classList.toggle('playing', seq.playing);
+  const drumsOn = seq.playing && !seq.drumsMuted;
+  $('drum-play').textContent = drumsOn ? '■ Stop' : '▶ Play';
+  $('drum-play').classList.toggle('playing', drumsOn);
   $('pattern-name').textContent = seq.pattern.name;
   $('pattern-feel').textContent = seq.pattern.feel;
   $('tempo').textContent = `${seq.bpm} bpm`;
@@ -318,7 +328,16 @@ function renderDrums() {
   if (knobPage === 'drums') renderKnobs();
 }
 
-$('drum-play').onclick = () => { ensureEngine(); seq.toggle(); };
+// With a loop going, the transport has to keep running, so Play/Stop just mutes the drums.
+function toggleDrums() {
+  if (looper.hasLoop && seq.playing) {
+    seq.drumsMuted = !seq.drumsMuted;
+    renderDrums();
+  } else {
+    seq.toggle();
+  }
+}
+$('drum-play').onclick = () => { ensureEngine(); toggleDrums(); };
 $('drum-fill').onclick = () => seq?.playing && seq.queueFill();
 $('pattern-prev').onclick = () => { ensureEngine(); seq.shiftPattern(-1); };
 $('pattern-next').onclick = () => { ensureEngine(); seq.shiftPattern(1); };
@@ -330,12 +349,70 @@ function onPad(note, velocity, isDown) {
     const i = note - PAD_A;
     flashPad(i, isDown);
     const action = PAD_ACTIONS[i];
-    if (isDown) action.down();
+    if (action.tap) {
+      if (isDown) {
+        action.held = false;
+        action.timer = setTimeout(() => { action.held = true; action.hold(); }, HOLD_MS);
+      } else {
+        clearTimeout(action.timer);
+        if (!action.held) action.tap();
+      }
+    } else if (isDown) action.down();
     else action.up?.();
   } else if (isDown && note >= PAD_B && note < PAD_B + 8) {
     engine.drums.play(PAD_SOUNDS[note - PAD_B], null, 0.35 + (velocity / 127) * 0.65);
   }
 }
+
+// ---------- Looper ----------
+
+const LOOP_STATES = {
+  empty: ['Empty', 'Pad 8 (or R) to record. Recording starts on the next bar.'],
+  armed: ['Get ready…', 'Recording starts on the next bar. Tap again to cancel.'],
+  recording: ['Recording', 'Tap pad 8 at the end of your phrase to close the loop.'],
+  playing: ['Playing', 'Tap to add a layer (pick a new sound first!). Hold to undo. Double-tap to stop.'],
+  overdub: ['Adding layer', 'Tap to keep this layer. Hold to throw it away.'],
+  stopped: ['Stopped', 'Tap to play from the next bar. Hold to clear everything.'],
+};
+
+function renderLooper() {
+  if (!looper) return;
+  const [title, hint] = LOOP_STATES[looper.state];
+  $('loop-state').textContent = title;
+  $('loop-state').dataset.state = looper.state;
+  $('loop-hint').textContent = hint;
+  $('loop-length').textContent = looper.hasLoop ? `${looper.bars} bar${looper.bars === 1 ? '' : 's'}` : '';
+  if (!looper.hasLoop) $('loop-progress').style.width = '0';
+  $('looper').classList.toggle('active', looper.state !== 'empty');
+
+  const list = $('loop-layers');
+  list.innerHTML = '';
+  const rows = [...looper.layers];
+  if (looper.current && looper.state !== 'armed') rows.push({ ...looper.current, recording: true });
+  rows.forEach((l, i) => {
+    const row = document.createElement('div');
+    row.className = 'layer' + (l.muted ? ' muted' : '') + (l.recording ? ' rec' : '');
+    row.style.setProperty('--c', l.preset.color);
+    const options = PRESETS.map((p) => `<option value="${p.id}" ${p.id === l.preset.id ? 'selected' : ''}>${p.name}</option>`).join('');
+    row.innerHTML = `<span class="dot"></span><span class="lname">Layer ${i + 1}</span>
+      <select ${l.recording ? 'disabled' : ''}>${options}</select>
+      <span class="count">${l.recording ? 'recording…' : `${l.events.length} notes`}</span>
+      ${l.recording ? '' : '<button class="small mute">Mute</button><button class="small del" title="Delete layer">✕</button>'}`;
+    if (!l.recording) {
+      row.querySelector('select').onchange = (e) => looper.setLayerPreset(l.id, PRESETS.find((p) => p.id === e.target.value));
+      row.querySelector('.mute').onclick = () => looper.toggleMute(l.id);
+      row.querySelector('.mute').textContent = l.muted ? 'Unmute' : 'Mute';
+      row.querySelector('.del').onclick = () => looper.removeLayer(l.id);
+    }
+    list.appendChild(row);
+  });
+  renderDrums();
+}
+
+$('loop-tap').onclick = () => { ensureEngine(); looper.tap(); };
+$('loop-stop').onclick = () => { if (looper?.hasLoop) looper.stop(); };
+$('loop-undo').onclick = () => looper?.undo();
+$('loop-clear').onclick = () => looper?.clear();
 
 // ---------- Monitor ----------
 
@@ -363,6 +440,9 @@ function ensureEngine() {
     clock = new MidiClock(engine.ctx, () => seq.bpm);
     clock.setOutput(midiOut);
     seq.onStart = (t) => clock.align(t); // arp locks to the drum grid
+    looper = new Looper(engine, seq, { onState: renderLooper });
+    seq.onSchedule = (step, t) => looper.onSchedule(step, t);
+    window.vibesynth = { engine, seq, looper, chords }; // handy in the devtools console
     syncChordSettings();
     selectPreset(presetIndex);
     $('start').classList.add('hidden');
@@ -449,6 +529,10 @@ const heldKeys = new Set();
 window.addEventListener('keydown', (e) => {
   if (e.target.tagName === 'SELECT' || e.target.tagName === 'INPUT') return;
   if (e.key === 'Escape') return panic();
+  if (e.key.toLowerCase() === 'r') {
+    if (!e.repeat) { ensureEngine(); looper.padDown(); }
+    return;
+  }
   if (e.key === 'Tab') { e.preventDefault(); return setMode(mode === 'chords' ? 'notes' : 'chords'); }
   if (e.key === ' ') { e.preventDefault(); ensureEngine(); return seq.toggle(); }
   if (e.key === 'ArrowRight') return selectPreset(presetIndex + 1);
@@ -466,6 +550,7 @@ window.addEventListener('keydown', (e) => {
   keyDown(60 + i, 100);
 });
 window.addEventListener('keyup', (e) => {
+  if (e.key.toLowerCase() === 'r' && looper) return looper.padUp();
   const i = COMPUTER_KEYS.indexOf(e.key.toLowerCase());
   if (i < 0 || !heldKeys.has(i)) return;
   heldKeys.delete(i);

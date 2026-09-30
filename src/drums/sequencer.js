@@ -15,7 +15,8 @@ export class Sequencer {
     this.bpm = 92;
     this.busy = 0.5;
     this.swing = 0;
-    this.playing = false;
+    this.playing = false; // the transport (clock) is running
+    this.drumsMuted = false; // transport keeps running for the looper, drums silent
     this.breakHeld = false;
     this.fillQueued = false;
     this.fill = null;
@@ -33,9 +34,9 @@ export class Sequencer {
     this.setPattern(patternsFor(id)[0]);
   }
 
-  nextSignature() {
+  shiftSignature(dir) {
     const i = SIGNATURES.findIndex((s) => s.id === this.sigId);
-    this.setSignature(SIGNATURES[(i + 1) % SIGNATURES.length].id);
+    this.setSignature(SIGNATURES[(i + dir + SIGNATURES.length) % SIGNATURES.length].id);
   }
 
   setPattern(p) {
@@ -65,6 +66,7 @@ export class Sequencer {
 
   stop() {
     this.playing = false;
+    this.drumsMuted = false;
     clearInterval(this.timer);
     this.fill = null;
     this.fillQueued = false;
@@ -116,6 +118,14 @@ export class Sequencer {
     if (step % 2 === 1) t += this.swing * this.stepDur * 0.45;
     const human = () => (Math.random() - 0.5) * 0.006;
 
+    this.onSchedule?.(step, t);
+    const delay = Math.max(0, (t - this.ctx.currentTime) * 1000);
+    setTimeout(() => this.onStep?.(step % this.length, inBar, step), delay);
+    if (this.drumsMuted) {
+      this.fill = null;
+      return;
+    }
+
     if (inBar === 0 && this.crashNext) {
       this.crashNext = false;
       this.kit.play('crash', t, 0.9);
@@ -144,9 +154,17 @@ export class Sequencer {
         }
       }
     }
+  }
 
-    const delay = Math.max(0, (t - this.ctx.currentTime) * 1000);
-    setTimeout(() => this.onStep?.(step % this.length, inBar), delay);
+  // Where in the global step count an audio-clock time falls (fractional).
+  posAt(time) {
+    return this.step + (time - this.nextTime) / this.stepDur;
+  }
+
+  // First step of the next bar that hasn't been scheduled yet.
+  nextBarStep() {
+    const bar = this.sig.barSteps;
+    return Math.ceil(this.step / bar) * bar;
   }
 
   playFill(i, t) {

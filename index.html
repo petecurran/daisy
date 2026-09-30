@@ -51,6 +51,23 @@
       </div>
     </section>
 
+    <section id="looper" class="looper">
+      <div class="loop-head">
+        <h2>Looper</h2>
+        <span id="loop-state" class="loop-state" data-state="empty">Empty</span>
+        <span id="loop-length" class="muted"></span>
+        <div class="loop-buttons">
+          <button id="loop-tap" class="small">● Rec / Play / Layer</button>
+          <button id="loop-stop" class="small">Stop</button>
+          <button id="loop-undo" class="small">Undo</button>
+          <button id="loop-clear" class="small">Clear</button>
+        </div>
+      </div>
+      <div class="loop-bar"><div id="loop-progress" class="loop-progress"></div></div>
+      <p id="loop-hint" class="hint">Pad 8 (or R) to record. Recording starts on the next bar.</p>
+      <div id="loop-layers" class="loop-layers"></div>
+    </section>
+
     <section id="drum-stage" class="drum-stage">
       <div class="drum-head">
         <button id="drum-play" class="drum-play">▶ Play</button>
@@ -76,7 +93,7 @@
           <div class="foot-title">Pads · bank A <small>(bank B = play drums live)</small></div>
           <div id="pad-map" class="pad-map"></div>
         </div>
-        <p class="hint">Space = play/stop. Turn <b>Busy</b> (drums knob page) to add or strip hits: bright squares play, faint ones are waiting for more Busy.</p>
+        <p class="hint">Space = play/stop. Hold pad 3/4 to change time signature. Turn <b>Busy</b> (drums knob page) to add or strip hits: bright squares play, faint ones are waiting for more Busy.</p>
       </div>
     </section>
 

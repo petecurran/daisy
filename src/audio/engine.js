@@ -29,7 +29,8 @@ export class Engine {
     vibLfo.start();
 
     this.macros = { brightness: 0.5, resonance: 0.5, release: 0.5 };
-    this.voices = new Map(); // note -> Voice
+    this.voices = new Map(); // note -> Voice (live playing)
+    this.loopVoices = []; // voices started by the looper
     this.all = [];
     this.preset = null;
   }
@@ -53,6 +54,26 @@ export class Engine {
     const v = new Voice(this, this.preset, note, velocity);
     this.voices.set(note, v);
     this.all.push(v);
+    this.onLiveOn?.(note, velocity);
+  }
+
+  // A note with a known start and length, in any preset: used by looper playback.
+  playNote(note, velocity, preset, start, duration) {
+    this.all = this.all.filter((v) => !v.done || v.loopEnd > this.ctx.currentTime);
+    this.loopVoices = this.loopVoices.filter((v) => v.loopEnd > this.ctx.currentTime);
+    const live = this.all.filter((v) => !v.done);
+    if (live.length >= MAX_VOICES) live[0].kill();
+    const v = new Voice(this, preset, note, velocity, start);
+    v.release(1, start + duration);
+    v.done = false; // still sounding until its scheduled release
+    v.loopEnd = start + duration;
+    this.all.push(v);
+    this.loopVoices.push(v);
+  }
+
+  stopLoopVoices() {
+    for (const v of this.loopVoices) v.kill();
+    this.loopVoices = [];
   }
 
   noteOff(note) {
@@ -60,6 +81,7 @@ export class Engine {
     if (!v) return;
     this.voices.delete(note);
     v.release(Math.pow(4, (this.macros.release - 0.5) * 2));
+    this.onLiveOff?.(note);
   }
 
   allOff() {

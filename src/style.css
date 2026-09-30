@@ -177,3 +177,29 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-
   .knobs { grid-template-columns: repeat(2, 1fr); }
   .pad-map { grid-template-columns: repeat(4, 1fr); }
 }
+
+.pad .sub { display: block; color: var(--muted); font-size: 10px; margin-top: 2px; }
+.pad.hit .sub { color: #1a110b; }
+
+/* ---------- Looper ---------- */
+
+.looper { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 16px 18px; display: grid; gap: 10px; }
+.loop-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.loop-head h2 { margin: 0; }
+.loop-buttons { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+.loop-state { font-weight: 700; padding: 3px 12px; border-radius: 99px; background: var(--panel-2); color: var(--muted); font-size: 13px; }
+.loop-state[data-state="armed"] { background: #6b5a2a; color: #ffe9a8; animation: blink 0.6s steps(2) infinite; }
+.loop-state[data-state="recording"], .loop-state[data-state="overdub"] { background: #b8433a; color: #fff; }
+.loop-state[data-state="playing"] { background: #3f6b46; color: #d8f5dc; }
+@keyframes blink { 50% { opacity: 0.5; } }
+.loop-bar { height: 6px; background: var(--panel-2); border-radius: 3px; overflow: hidden; }
+.loop-progress { height: 100%; width: 0; background: var(--accent); transition: width 0.08s linear; }
+.looper .hint { margin: 0; }
+.loop-layers { display: grid; gap: 6px; }
+.layer { display: flex; align-items: center; gap: 10px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px; font-size: 13px; }
+.layer .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--c); box-shadow: 0 0 8px var(--c); }
+.layer .lname { font-weight: 600; min-width: 60px; }
+.layer select { font: inherit; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; }
+.layer .count { color: var(--muted); margin-right: auto; }
+.layer.muted { opacity: 0.45; }
+.layer.rec { border-color: #b8433a; }

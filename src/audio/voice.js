@@ -3,7 +3,7 @@
 const mtof = (n) => 440 * Math.pow(2, (n - 69) / 12);
 
 export class Voice {
-  constructor(engine, preset, note, velocity) {
+  constructor(engine, preset, note, velocity, when) {
     const ctx = engine.ctx;
     this.ctx = ctx;
     this.engine = engine;
@@ -12,7 +12,7 @@ export class Voice {
     this.sources = [];
     this.pitchParams = []; // every AudioParam (cents) that pitch bend / vibrato / drift should move
 
-    const t = ctx.currentTime;
+    const t = Math.max(when ?? 0, ctx.currentTime);
     const vel = velocity / 127;
     const freq = mtof(note);
     const drift = (Math.random() * 2 - 1) * 4; // a little analog slop per voice
@@ -156,8 +156,8 @@ export class Voice {
     this.f2.Q.setTargetAtTime(this.preset.filter.q * this.engine.macros.resonance * 2, t, 0.02);
   }
 
-  release(extra = 1) {
-    const t = this.ctx.currentTime;
+  release(extra = 1, at) {
+    const t = Math.max(at ?? 0, this.ctx.currentTime);
     const r = this.releaseTime * extra;
     this.out.gain.cancelAndHoldAtTime(t);
     this.out.gain.setTargetAtTime(0, t, r / 4);
@@ -168,7 +168,7 @@ export class Voice {
     }
     const end = t + r * 1.6 + 0.05;
     for (const s of this.sources) s.stop(end);
-    setTimeout(() => this.out.disconnect(), (end - t) * 1000 + 100);
+    setTimeout(() => this.out.disconnect(), (end - this.ctx.currentTime) * 1000 + 100);
     this.done = true;
   }
 
