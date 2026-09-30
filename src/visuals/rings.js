@@ -21,7 +21,13 @@ uniform vec2 origin, res;
 uniform float maxR;
 uniform float time, pulse, ripple, rippleAmp, shimmer, scatter, wobble, ringing, split, echoGap, echo, cell, heat, exposure, zoom, reverb, dpr;
 
-float hash(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
+// Dave Hoskins' sine-free hash: the usual fract(sin(...)) one turns into visible stripes once
+// its inputs get large (pixel coordinates x a running clock), which read as VHS lines.
+float hash(vec3 p) {
+  p = fract(p * 0.1031);
+  p += dot(p, p.zyx + 31.32);
+  return fract((p.x + p.y) * p.z);
+}
 
 // The wave's edge, bent by tape wobble.
 float shapeOffset(float ang, float seed) {
@@ -82,16 +88,32 @@ vec3 shade(float r, float ang) {
 
 void main() {
   vec2 frag = gl_FragCoord.xy;
-  // Drive, at the top end: horizontal glitch tears, jumping with the kick.
-  float band = floor(frag.y / (14.0 * dpr));
-  float tear = hash(vec3(band, floor(time * 9.0), 3.0));
-  float grunge = smoothstep(0.35, 1.0, heat);
-  frag.x += step(1.0 - grunge * 0.35 - pulse * 0.1, tear) * (hash(vec3(band, time, 1.0)) - 0.5) * 90.0 * dpr * grunge;
+  float grunge = smoothstep(0.3, 1.0, heat);
+
+  // Drive, very top of the knob: block smears. The odd chunk of the picture freezes and smears
+  // sideways, like a corrupted video file.
+  float B = 56.0 * dpr;
+  vec2 block = floor(frag / B);
+  float smear = smoothstep(0.75, 1.0, heat);
+  if (hash(vec3(block, floor(time * 5.0) + 11.0)) > 1.0 - smear * 0.14) {
+    frag.x = block.x * B + fract(frag.x / B) * B * 0.06;
+  }
 
   // Reverb pulls the camera back: everything shrinks into the distance.
   vec2 d = (frag - origin) / zoom;
   float r = length(d);
   float ang = atan(d.y, d.x); // full circle: the waves carry on below and around the deck
+
+  // Drive: ring slips. Arcs of the waves jolt round the circle like a skipping record, more
+  // often and further the harder you drive it, and on the kick.
+  float seg = floor((ang + PI) / (2.0 * PI) * 28.0);
+  float ringBand = floor(r / (46.0 * dpr));
+  float slot = floor(time * 7.0);
+  float slip = hash(vec3(seg, ringBand, slot));
+  if (slip > 1.0 - grunge * (0.3 + pulse * 0.25)) {
+    ang += (hash(vec3(ringBand, seg, slot + 5.0)) - 0.5) * 0.5 * grunge;
+    r += (hash(vec3(seg, slot, ringBand + 9.0)) - 0.5) * 20.0 * dpr * grunge;
+  }
   vec3 c;
   if (split > 0.5) {
     // Chorus: each wave splits into a pink and a cyan copy.
@@ -170,7 +192,7 @@ export class Rings {
     gl.uniform1fv(u.seeds, seeds);
     gl.uniform1fv(u.sparkle, sparkle);
     gl.uniform2f(u.origin, origin[0], origin[1]);
-    gl.uniform1f(u.time, now);
+    gl.uniform1f(u.time, now % 1000); // keep it small so float precision holds up
     gl.uniform1f(u.pulse, fx.pulse);
     gl.uniform1f(u.ripple, this.ripple);
     gl.uniform1f(u.rippleAmp, this.rippleAmp);
