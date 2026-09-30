@@ -17,8 +17,9 @@ export const ALL_PRESETS = [
     ],
     noise: 0.015,
     filter: { cutoff: 1400, q: 1.5, env: 1400, keytrack: 0.4 },
-    fenv: { a: 0.6, d: 1.2, s: 0.4, r: 1.5 },
-    aenv: { a: 0.35, d: 0.8, s: 0.85, r: 1.6 },
+    // Quicker bloom: the old 0.35s fade-in + 0.6s filter swell read as a second, louder hit.
+    fenv: { a: 0.22, d: 1.2, s: 0.4, r: 1.5 },
+    aenv: { a: 0.06, d: 0.8, s: 0.85, r: 1.6 },
     fx: { drive: 0.1, chorus: 0.9, wobble: 0.1, echo: 0.1, reverb: 0.45 },
   },
   {

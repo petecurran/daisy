@@ -81,6 +81,7 @@ export class Stage {
     bus.on('knob', (e) => { this.popup = { ...e, at: performance.now() }; });
     bus.on('pad', (e) => this.deck.pad(e));
     bus.on('step', (e) => { this.step = e; });
+    bus.on('hint', (e) => { this.hint = e && { ...e, at: performance.now() }; });
   }
 
   newBurst(loop, now) {
@@ -146,7 +147,7 @@ export class Stage {
 
   fx() {
     const e = this.src.engine;
-    const v = e.fx.values;
+    const v = { ...e.fx.values, ...e.colour.values }; // shared room + the current sound's pedals
     return {
       exposure: 0.45 + e.macros.brightness * 1.1,
       split: v.chorus,
@@ -176,7 +177,7 @@ export class Stage {
     look?.render(dt, now, fx, this.ringList(now, fx), [this.originCss[0] * this.dpr, this.H - this.originCss[1] * this.dpr]);
 
     this.hud(now);
-    this.deck.update();
+    this.deck.update({ sustain: this.src.sustain?.() });
     const live = this.bursts.findLast((b) => !b.loop && !b.ghost && b.held.size);
     this.deck.lightKeys(live ? [...live.held] : [], live?.color ?? [0, 0, 0]);
 
@@ -287,12 +288,6 @@ export class Stage {
       g.fillStyle = rgba(live.color, a);
       g.fillText(live.chord.name, W / 2, pad - 8 * d);
     }
-    if (chords) {
-      g.textAlign = 'center';
-      g.font = font(15, 600);
-      g.fillStyle = '#737aa2';
-      g.fillText(`key of ${NOTE_NAMES[chords.key.tonic]} ${chords.key.mode}`, W / 2, pad + 78 * d);
-    }
 
     // Top right: loop.
     if (looper) {
@@ -367,6 +362,28 @@ export class Stage {
         g.globalAlpha = 1;
       } else {
         this.popup = null;
+      }
+    }
+
+    // Short popups: sound / mode / key changes, and the key-select prompt while pad 6 is held.
+    if (this.hint) {
+      const a = this.hint.sticky ? 1 : Math.max(0, Math.min(1, 2 - ((tnow - this.hint.at) / 1000) * 1.3));
+      if (a > 0) {
+        g.globalAlpha = a;
+        g.font = font(24, 800);
+        const tw = g.measureText(this.hint.text).width;
+        const cy = oy - 46 * d;
+        g.fillStyle = 'rgba(13,14,22,0.8)';
+        g.beginPath();
+        g.roundRect(W / 2 - tw / 2 - 22 * d, cy - 22 * d, tw + 44 * d, 44 * d, 22 * d);
+        g.fill();
+        shadow(false);
+        g.fillStyle = this.hint.color ?? '#c0caf5';
+        g.fillText(this.hint.text, W / 2, cy);
+        shadow(true);
+        g.globalAlpha = 1;
+      } else {
+        this.hint = null;
       }
     }
 

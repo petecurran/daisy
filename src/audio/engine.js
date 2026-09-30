@@ -1,17 +1,21 @@
-import { FXChain, makeNoiseBuffer } from './fx.js';
+import { ColourChain, FXChain, makeNoiseBuffer } from './fx.js';
 import { Voice } from './voice.js';
 import { DrumKit } from '../drums/kit.js';
 import { bus } from '../bus.js';
 
-const MAX_VOICES = 28;
+// Counts notes still fading out too: released notes keep sounding through their release tail, and
+// hammering a key used to pile those up until the audio engine choked.
+const MAX_VOICES = 32;
 
 export class Engine {
   constructor() {
     this.ctx = new AudioContext({ latencyHint: 'interactive' });
     this.noiseBuffer = makeNoiseBuffer(this.ctx);
-    this.voiceBus = this.ctx.createGain();
-    this.fx = new FXChain(this.ctx, this.noiseBuffer);
-    this.voiceBus.connect(this.fx.input);
+    this.fx = new FXChain(this.ctx);
+    this.voiceBus = this.ctx.createGain(); // all sounds' colour chains meet here (the pump ducks it)
+    this.voiceBus.connect(this.fx.post);
+    this.chains = new Map(); // preset id -> ColourChain
+    this.presetMacros = new Map(); // preset id -> { brightness, resonance, release }
 
     // Drums skip the synth's chorus/wobble and go straight to the master, with their own room send.
     this.drums = new DrumKit(this.ctx, this.noiseBuffer, this.fx.master, this.fx.reverb);
@@ -29,29 +33,62 @@ export class Engine {
     vibLfo.connect(this.vibrato);
     vibLfo.start();
 
-    this.macros = { brightness: 0.5, resonance: 0.5, release: 0.5 };
     this.voices = new Map(); // note -> Voice (live playing)
     this.loopVoices = []; // voices started by the looper
     this.all = [];
     this.preset = null;
   }
 
+  // Each sound keeps its own colour pedals and tone settings, so loop layers keep their sound.
+  chainFor(preset) {
+    let c = this.chains.get(preset.id);
+    if (!c) {
+      c = new ColourChain(this.ctx, this.noiseBuffer, this.voiceBus);
+      c.set(preset.fx);
+      this.chains.set(preset.id, c);
+    }
+    return c;
+  }
+
+  macrosFor(preset) {
+    let m = this.presetMacros.get(preset.id);
+    if (!m) this.presetMacros.set(preset.id, (m = { brightness: 0.5, resonance: 0.5, release: 0.5 }));
+    return m;
+  }
+
+  get macros() { return this.macrosFor(this.preset); }
+  get colour() { return this.chainFor(this.preset); }
+
   // 0..1 knob -> x0.2 .. x5, with 0.5 = preset's own sound.
-  brightnessMult() {
-    return Math.pow(5, (this.macros.brightness - 0.5) * 2);
+  brightnessMult(preset = this.preset) {
+    return Math.pow(5, (this.macrosFor(preset).brightness - 0.5) * 2);
   }
 
   setPreset(preset) {
     this.preset = preset;
-    this.fx.set(preset.fx);
+    this.chainFor(preset);
+    // The room (echo/reverb) is shared; it starts from the first sound's taste, then it's yours.
+    if (!this.roomSet) {
+      this.fx.set({ echo: preset.fx.echo, reverb: preset.fx.reverb });
+      this.roomSet = true;
+    }
+  }
+
+  // Make room for one more voice: drop finished ones, then steal the oldest fading one (or oldest).
+  makeRoom() {
+    const now = this.ctx.currentTime;
+    this.all = this.all.filter((v) => v.end == null || v.end > now);
+    while (this.all.length >= MAX_VOICES) {
+      const i = this.all.findIndex((v) => v.end != null);
+      this.all.splice(i >= 0 ? i : 0, 1)[0].kill();
+    }
   }
 
   noteOn(note, velocity = 100) {
     if (!this.preset) return;
     const existing = this.voices.get(note);
     if (existing) existing.release(0.3);
-    this.all = this.all.filter((v) => !v.done);
-    if (this.all.length >= MAX_VOICES) this.all.shift().kill();
+    this.makeRoom();
     const v = new Voice(this, this.preset, note, velocity);
     this.voices.set(note, v);
     this.all.push(v);
@@ -61,14 +98,10 @@ export class Engine {
 
   // A note with a known start and length, in any preset: used by looper playback.
   playNote(note, velocity, preset, start, duration) {
-    this.all = this.all.filter((v) => !v.done || v.loopEnd > this.ctx.currentTime);
-    this.loopVoices = this.loopVoices.filter((v) => v.loopEnd > this.ctx.currentTime);
-    const live = this.all.filter((v) => !v.done);
-    if (live.length >= MAX_VOICES) live[0].kill();
+    this.loopVoices = this.loopVoices.filter((v) => v.end > this.ctx.currentTime);
+    this.makeRoom();
     const v = new Voice(this, preset, note, velocity, start);
     v.release(1, start + duration);
-    v.done = false; // still sounding until its scheduled release
-    v.loopEnd = start + duration;
     this.all.push(v);
     this.loopVoices.push(v);
     bus.emitAt(this.ctx, start, 'note', { note, vel: velocity, preset, loop: true });
@@ -84,7 +117,7 @@ export class Engine {
     const v = this.voices.get(note);
     if (!v) return;
     this.voices.delete(note);
-    v.release(Math.pow(4, (this.macros.release - 0.5) * 2));
+    v.release(Math.pow(4, (this.macrosFor(v.preset).release - 0.5) * 2));
     this.onLiveOff?.(note);
     bus.emit('noteoff', { note });
   }
@@ -105,7 +138,7 @@ export class Engine {
 
   setMacro(name, value) {
     this.macros[name] = value;
-    const live = this.all.filter((v) => !v.done);
+    const live = this.all.filter((v) => v.preset === this.preset && !v.killed);
     if (name === 'brightness') live.forEach((v) => v.applyCutoff());
     if (name === 'resonance') live.forEach((v) => v.applyResonance());
   }

@@ -1,61 +1,79 @@
 import { KNOB_COLORS } from './palette.js';
 import { KNOB_ICONS, KNOB_LABELS, svg } from './icons.js';
-import { ZONE_LABELS } from '../chords.js';
+import { NOTE_NAMES } from '../chords.js';
 
-// The on-screen deck: the MPK laid out as it is on the desk (joystick, pads, knobs, keys). Pads are
-// labelled with what they'll do right now, and the one you most likely want next glows softly.
-
-// Pads in hardware order (index 0 = pad 1). Top row on the MPK is pads 5-8.
-const PADS = [
-  { hold: 'hold: stop all' },
-  { icon: 'fill', label: 'Fill' },
-  { icon: 'prev', label: 'Groove', hold: 'hold: time sig' },
-  { icon: 'next', label: 'Groove', hold: 'hold: time sig' },
-  { icon: 'sliders', hold: 'hold: next sound' },
-  { icon: 'metronome', label: 'Tap tempo' },
-  { icon: 'pause', label: 'Break', hold: 'hold it' },
-  { hold: 'hold: undo' },
-];
+// The on-screen deck: a slim strip laid out like the MPK. Pads are labelled with what they do on the
+// current knob page (and what they'll do right now); the knobs are small colour rings; the keys are a
+// light strip that glows in the chord's colour.
 
 const LOOP_PAD = {
-  empty: ['record', 'Record loop'], armed: ['record', 'Cancel'], recording: ['record', 'Close loop'],
-  playing: ['loop', 'Add layer'], overdub: ['loop', 'Keep layer'], stopped: ['loop', 'Resume loop'],
+  empty: ['record', 'Record'], armed: ['record', 'Cancel'], recording: ['record', 'Close loop'],
+  playing: ['loop', 'Add layer'], overdub: ['loop', 'Keep layer'], stopped: ['loop', 'Resume'],
 };
+
+// What each pad shows, per knob page. Pad index 0 = pad 1.
+function padInfo(page, i, s) {
+  const { seq, looper, mode, key } = s;
+  const drumsOn = seq?.playing && !seq.drumsMuted;
+  if (i === 0) return { icon: drumsOn ? 'stop' : 'play', label: drumsOn ? 'Stop drums' : 'Drums', sub: 'hold: stop all', state: drumsOn ? 'green' : '' };
+  if (i === 4) return { icon: 'sliders', label: page === 'drums' ? 'Drum knobs' : 'Sound knobs', sub: 'tap: flip' };
+  if (i === 7) {
+    const st = looper?.state ?? 'empty';
+    const [icon, label] = LOOP_PAD[st];
+    return { icon, label, sub: st === 'empty' ? 'loop' : 'hold: undo', state: { armed: 'amber', recording: 'red', overdub: 'red', playing: 'green' }[st] ?? '' };
+  }
+  if (page === 'sound') {
+    return [
+      null,
+      { icon: mode === 'chords' ? 'layers' : 'note', label: mode === 'chords' ? 'Chords' : 'Notes', sub: 'tap: switch', state: mode === 'notes' ? 'pink' : '' },
+      { icon: 'prev', label: 'Sound', sub: '' },
+      { icon: 'next', label: 'Sound', sub: '' },
+      null,
+      { icon: 'hash', label: key, sub: 'hold + press key' },
+      { icon: 'pin', label: 'Sustain', sub: 'hold', state: s.sustain ? 'pink' : '' },
+    ][i];
+  }
+  return [
+    null,
+    { icon: 'fill', label: 'Fill', sub: '' },
+    { icon: 'prev', label: 'Groove', sub: 'hold: time sig' },
+    { icon: 'next', label: 'Groove', sub: 'hold: time sig' },
+    null,
+    { icon: 'metronome', label: 'Tap tempo', sub: '' },
+    { icon: 'pause', label: 'Break', sub: 'hold', state: seq?.breakHeld ? 'pink' : '' },
+  ][i];
+}
 
 export class Deck {
   constructor(root, src) {
     this.root = root;
-    this.src = src; // { seq, looper, joy, chords, knobs(), page(), preset() }
+    this.src = src; // { seq, looper, joy, chords, knobs(), page(), preset(), mode() }
     this.cache = new Map();
     this.hits = new Map();
     root.innerHTML = `
-      <div class="deck-guide">
-        <div class="chips">
+      <div class="deck-row">
+        <div class="status">
           <span class="chip sound-chip"><i></i><span></span></span>
-          <span class="chip page-chip"></span>
+          <span class="chip key-chip"></span>
+          <span class="chip mode-chip"></span>
         </div>
-      </div>
-      <div class="deck-main">
         <div class="joy">
           <svg viewBox="-50 -50 100 100">
-            <circle r="34" class="joy-ring"/>
-            <text y="-39">+7th</text><text y="46">sus4</text>
-            <text x="-47" y="1.5" text-anchor="end">flip</text><text x="47" y="1.5" text-anchor="start">add9</text>
-            <circle r="8" class="joy-dot"/>
+            <circle r="40" class="joy-ring"/>
+            <circle r="10" class="joy-dot"/>
           </svg>
-          <div class="joy-label"></div>
         </div>
         <div class="pads"></div>
         <div class="knobs"></div>
       </div>
-      <div class="keys"></div>`;
+      <div class="strip"></div>`;
 
     const pads = root.querySelector('.pads');
-    for (const i of [4, 5, 6, 7, 0, 1, 2, 3]) {
+    for (const i of [4, 5, 6, 7, 0, 1, 2, 3]) { // the hardware has pads 5-8 on top
       const el = document.createElement('div');
       el.className = 'pad';
       el.dataset.i = i;
-      el.innerHTML = `<span class="pad-num">${i + 1}</span><span class="pad-icon"></span><span class="pad-label"></span><span class="pad-hold">${PADS[i].hold ?? ''}</span>`;
+      el.innerHTML = `<span class="pad-icon"></span><span class="pad-text"><b></b><small></small></span><span class="pad-num">${i + 1}</span>`;
       pads.appendChild(el);
     }
     this.padEls = [...pads.children].sort((a, b) => a.dataset.i - b.dataset.i);
@@ -65,38 +83,26 @@ export class Deck {
       const el = document.createElement('div');
       el.className = 'knob';
       el.style.setProperty('--c', KNOB_COLORS[i]);
-      el.innerHTML = `<div class="dial"><svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="19" class="track"/><circle cx="24" cy="24" r="19" class="value"/></svg><span class="knob-icon"></span></div><span class="knob-label"></span><span class="knob-value"></span>`;
+      el.innerHTML = `<div class="dial"><svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="19" class="track"/><circle cx="24" cy="24" r="19" class="value"/></svg><span class="knob-icon"></span></div><span class="knob-label"></span>`;
       knobs.appendChild(el);
     }
     this.knobEls = [...knobs.children];
 
-    // 25 keys: 15 white, 10 black, folded onto two octaves.
-    const keys = root.querySelector('.keys');
-    const whites = [0, 2, 4, 5, 7, 9, 11];
-    for (let k = 0; k < 15; k++) {
-      const el = document.createElement('div');
-      el.className = 'key white';
-      el.dataset.note = k === 14 ? 24 : whites[k % 7] + Math.floor(k / 7) * 12;
-      el.style.left = `${(k / 15) * 100}%`;
-      keys.appendChild(el);
+    // 25 keys as a light strip; the black keys are shorter, so the keyboard's shape is still there.
+    const strip = root.querySelector('.strip');
+    const blacks = new Set([1, 3, 6, 8, 10]);
+    this.keyEls = new Map();
+    for (let n = 0; n <= 24; n++) {
+      const el = document.createElement('i');
+      if (blacks.has(n % 12)) el.className = 'black';
+      strip.appendChild(el);
+      this.keyEls.set(n, el);
     }
-    const blackAfter = [0, 1, 3, 4, 5], blackSemi = [1, 3, 6, 8, 10];
-    for (let oct = 0; oct < 2; oct++) {
-      blackAfter.forEach((w, j) => {
-        const el = document.createElement('div');
-        el.className = 'key black';
-        el.dataset.note = blackSemi[j] + oct * 12;
-        el.style.left = `${((w + oct * 7 + 1) / 15) * 100}%`;
-        keys.appendChild(el);
-      });
-    }
-    this.keyEls = new Map([...keys.children].map((el) => [+el.dataset.note, el]));
   }
 
   set(key, el, prop, value) {
-    const k = key;
-    if (this.cache.get(k) === value) return;
-    this.cache.set(k, value);
+    if (this.cache.get(key) === value) return;
+    this.cache.set(key, value);
     if (prop === 'html') el.innerHTML = value;
     else if (prop === 'text') el.textContent = value;
     else if (prop.startsWith('--')) el.style.setProperty(prop, value);
@@ -106,78 +112,60 @@ export class Deck {
 
   pad({ index, down }) { if (down) this.hits.set(index, performance.now()); }
 
-  // Where a (folded) note's key sits on screen, for the ink to pour from.
-  keyCenter(note) {
-    const el = this.keyEls.get(((note % 24) + 24) % 24) ?? this.keyEls.get(0);
-    const r = el.getBoundingClientRect();
-    return [r.left + r.width / 2, this.root.getBoundingClientRect().top];
-  }
-
   top() { return this.root.getBoundingClientRect().top; }
 
-  // The pad you most likely want next: drums first, then the loop pedal.
+  // The pad you most likely want next: drums first, then the loop.
   suggestedPad() {
     const { seq, looper } = this.src;
     return !seq?.playing && (looper?.state ?? 'empty') === 'empty' ? 0 : 7;
   }
 
-  update() {
-    const { seq, looper, joy, chords } = this.src;
+  update(extra = {}) {
+    const { joy, chords } = this.src;
     const now = performance.now();
     const page = this.src.page();
     const preset = this.src.preset();
+    const mode = this.src.mode();
+    const key = chords ? `${NOTE_NAMES[chords.key.tonic]} ${chords.key.mode === 'major' ? 'maj' : 'min'}` : 'Key';
+    const info = { ...this.src, mode, key: `Key ${key}`, sustain: extra.sustain };
 
-    const padIdx = this.suggestedPad();
     const chip = this.root.querySelector('.sound-chip');
     this.set('sound', chip.lastElementChild, 'text', preset.name);
     this.set('soundc', chip, '--c', preset.color);
-    this.set('page', this.root.querySelector('.page-chip'), 'text', page === 'drums' ? 'Knobs: DRUMS' : 'Knobs: SOUND');
+    this.set('key', this.root.querySelector('.key-chip'), 'text', key);
+    this.set('mode', this.root.querySelector('.mode-chip'), 'text', mode === 'chords' ? 'Chords' : 'Notes');
+    this.set('modeon', this.root.querySelector('.mode-chip'), '.notes', mode === 'notes');
 
-    // Pads.
-    const drumsOn = seq?.playing && !seq.drumsMuted;
+    const suggest = this.suggestedPad();
     this.padEls.forEach((el, i) => {
-      let icon = PADS[i].icon, label = PADS[i].label, state = '';
-      if (i === 0) { icon = drumsOn ? 'stop' : 'play'; label = drumsOn ? 'Stop drums' : 'Start drums'; state = drumsOn ? 'green' : ''; }
-      if (i === 4) label = 'Knob page';
-      if (i === 6 && seq?.breakHeld) state = 'pink';
-      if (i === 7) {
-        const ls = looper?.state ?? 'empty';
-        [icon, label] = LOOP_PAD[ls];
-        state = { armed: 'amber', recording: 'red', overdub: 'red', playing: 'green' }[ls] ?? '';
-      }
-      this.set(`padi${i}`, el.querySelector('.pad-icon'), 'html', svg(icon));
-      this.set(`padl${i}`, el.querySelector('.pad-label'), 'text', label);
-      this.set(`pads${i}`, el, 'data-state', state);
-      this.set(`padn${i}`, el, '.suggest', i === padIdx);
+      const p = padInfo(page, i, info);
+      this.set(`pi${i}`, el.querySelector('.pad-icon'), 'html', svg(p.icon));
+      this.set(`pl${i}`, el.querySelector('b'), 'text', p.label);
+      this.set(`ps${i}`, el.querySelector('small'), 'text', p.sub);
+      this.set(`pst${i}`, el, 'data-state', p.state ?? '');
+      this.set(`psg${i}`, el, '.suggest', i === suggest);
       el.classList.toggle('hit', now - (this.hits.get(i) ?? -1e9) < 180);
     });
 
-    // Knobs.
     const knobs = this.src.knobs();
     this.knobEls.forEach((el, i) => {
-      const k = knobs[i];
-      const v = k.get();
       this.set(`ki${i}${page}`, el.querySelector('.knob-icon'), 'html', svg(KNOB_ICONS[page][i]));
       this.set(`kl${i}`, el.querySelector('.knob-label'), 'text', KNOB_LABELS[page][i]);
-      this.set(`kv${i}`, el.querySelector('.knob-value'), 'text', k.fmt ? k.fmt() : `${Math.round(v * 100)}`);
-      this.set(`kd${i}`, el, '--v', v.toFixed(3));
+      this.set(`kd${i}`, el, '--v', knobs[i].get().toFixed(3));
     });
 
-    // Joystick.
     const x = joy?.x ?? 0, y = joy ? joy.up - joy.down : 0;
     const dot = this.root.querySelector('.joy-dot');
-    this.set('jx', dot, 'cx', (x * 26).toFixed(1));
-    this.set('jy', dot, 'cy', (-y * 26).toFixed(1));
-    const zone = joy?.zone ?? 'C';
-    this.set('jz', this.root.querySelector('.joy-label'), 'text', zone === 'C' ? 'chord colour' : ZONE_LABELS[zone]);
-    this.set('jzon', this.root.querySelector('.joy'), '.on', zone !== 'C');
+    this.set('jx', dot, 'cx', (x * 28).toFixed(1));
+    this.set('jy', dot, 'cy', (-y * 28).toFixed(1));
+    this.set('jzon', this.root.querySelector('.joy'), '.on', (joy?.zone ?? 'C') !== 'C');
   }
 
   // Light the keys that are sounding, in the chord's colour.
   lightKeys(notes, color) {
     const lit = new Set(notes.map((n) => ((n % 24) + 24) % 24));
     for (const [n, el] of this.keyEls) {
-      const on = lit.has(n);
+      const on = lit.has(n) || (n === 24 && lit.has(0));
       el.classList.toggle('lit', on);
       if (on) el.style.setProperty('--c', `rgb(${color})`);
     }

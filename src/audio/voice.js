@@ -19,7 +19,8 @@ export class Voice {
 
     this.out = ctx.createGain();
     this.out.gain.value = 0;
-    this.out.connect(engine.voiceBus);
+    this.out.connect(engine.chainFor(preset).input);
+    this.end = null; // audio time this voice falls silent (set on release)
 
     // Two cascaded lowpasses = a smooth 24dB slope; resonance only on the second.
     const f = preset.filter;
@@ -27,7 +28,7 @@ export class Voice {
     this.f2 = ctx.createBiquadFilter();
     this.f1.type = this.f2.type = 'lowpass';
     this.f1.Q.value = 0.6;
-    this.f2.Q.value = f.q * engine.macros.resonance * 2;
+    this.f2.Q.value = f.q * engine.macrosFor(preset).resonance * 2;
     this.baseCutoff = f.cutoff * Math.pow(freq / 261.6, f.keytrack);
     this.applyCutoff(t, true);
     this.f1.connect(this.f2);
@@ -143,7 +144,7 @@ export class Voice {
   }
 
   applyCutoff(t = this.ctx.currentTime, immediate = false) {
-    const hz = Math.min(18000, this.baseCutoff * this.engine.brightnessMult());
+    const hz = Math.min(18000, this.baseCutoff * this.engine.brightnessMult(this.preset));
     if (immediate) {
       this.f1.frequency.value = this.f2.frequency.value = hz;
     } else {
@@ -153,7 +154,7 @@ export class Voice {
   }
 
   applyResonance(t = this.ctx.currentTime) {
-    this.f2.Q.setTargetAtTime(this.preset.filter.q * this.engine.macros.resonance * 2, t, 0.02);
+    this.f2.Q.setTargetAtTime(this.preset.filter.q * this.engine.macrosFor(this.preset).resonance * 2, t, 0.02);
   }
 
   release(extra = 1, at) {
@@ -167,6 +168,7 @@ export class Voice {
       flt.detune.setTargetAtTime(0, t, fe.r / 4);
     }
     const end = t + r * 1.6 + 0.05;
+    this.end = end;
     for (const s of this.sources) s.stop(end);
     setTimeout(() => this.out.disconnect(), (end - this.ctx.currentTime) * 1000 + 100);
     this.done = true;
@@ -179,6 +181,8 @@ export class Voice {
     this.out.gain.setTargetAtTime(0, t, 0.01);
     for (const s of this.sources) s.stop(t + 0.08);
     setTimeout(() => this.out.disconnect(), 200);
+    this.end = t + 0.08;
+    this.killed = true;
     this.done = true;
   }
 }

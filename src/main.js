@@ -19,17 +19,35 @@ const PAD_CHANNEL = 9;
 const PAD_A = 44;
 const PAD_B = 32;
 
-// Each pad: `down`/`up` fire instantly; `tap`/`hold` wait to see how long the pad is held.
-const PAD_ACTIONS = [
-  { label: 'Play / Stop drums', sub: 'hold: stop everything', tap: () => toggleDrums(), hold: () => stopEverything() },
-  { label: 'Fill', down: () => seq.playing && seq.queueFill() },
-  { label: '◀ Pattern', sub: 'hold: time sig', tap: () => seq.shiftPattern(-1), hold: () => seq.shiftSignature(-1) },
-  { label: 'Pattern ▶', sub: 'hold: time sig', tap: () => seq.shiftPattern(1), hold: () => seq.shiftSignature(1) },
-  { label: 'Knobs: Sound ⇄ Drums', sub: 'hold: next sound', tap: () => setKnobPage(knobPage === 'sound' ? 'drums' : 'sound'), hold: () => selectPreset(presetIndex + 1) },
-  { label: 'Tap tempo', down: () => { seq.tap(); engine.syncEcho(seq.bpm); } },
-  { label: 'Break (hold)', down: () => { seq.breakHeld = true; renderDrums(); }, up: () => { seq.breakHeld = false; renderDrums(); } },
-  { label: 'Looper', sub: 'tap · 2×tap stop · hold undo', down: () => looper.padDown(), up: () => looper.padUp() },
-];
+// Pads change with the knob page, so they always fit what you're doing.
+// `down`/`up` fire instantly; `tap`/`hold` wait to see how long the pad is held.
+const DRUMS_PAD = { label: 'Play / Stop drums', sub: 'hold: stop everything', tap: () => toggleDrums(), hold: () => stopEverything() };
+const PAGE_PAD = { label: 'Knob page', tap: () => setKnobPage(knobPage === 'sound' ? 'drums' : 'sound') };
+const LOOP_PAD = { label: 'Looper', sub: 'tap · 2×tap stop · hold undo', down: () => looper.padDown(), up: () => looper.padUp() };
+const PAD_PAGES = {
+  sound: [
+    DRUMS_PAD,
+    { label: 'Chords ⇄ Notes', down: () => setMode(mode === 'chords' ? 'notes' : 'chords') },
+    { label: '◀ Sound', down: () => selectPreset(presetIndex - 1) },
+    { label: 'Sound ▶', down: () => selectPreset(presetIndex + 1) },
+    PAGE_PAD,
+    { label: 'Key', sub: 'hold + press a key · tap: major/minor', tap: toggleKeyMode, hold: () => setKeySelect(true), up: () => setKeySelect(false) },
+    { label: 'Sustain (hold)', down: () => setSustain(true), up: () => setSustain(false) },
+    LOOP_PAD,
+  ],
+  drums: [
+    DRUMS_PAD,
+    { label: 'Fill', down: () => seq.playing && seq.queueFill() },
+    { label: '◀ Pattern', sub: 'hold: time sig', tap: () => seq.shiftPattern(-1), hold: () => seq.shiftSignature(-1) },
+    { label: 'Pattern ▶', sub: 'hold: time sig', tap: () => seq.shiftPattern(1), hold: () => seq.shiftSignature(1) },
+    PAGE_PAD,
+    { label: 'Tap tempo', down: () => { seq.tap(); engine.syncEcho(seq.bpm); } },
+    { label: 'Break (hold)', down: () => { seq.breakHeld = true; renderDrums(); }, up: () => { seq.breakHeld = false; renderDrums(); } },
+    LOOP_PAD,
+  ],
+};
+const PAD_ACTIONS = PAD_PAGES.drums; // the settings page's pad map shows the drum layout
+const padPressed = new Map(); // pad index -> the action it was pressed with (pages can flip mid-press)
 const HOLD_MS = 500;
 
 const COMPUTER_KEYS = 'awsedftgyhujk';
@@ -50,8 +68,12 @@ const $ = (id) => document.getElementById(id);
 
 // ---------- Knob pages ----------
 
+// Drive / chorus / wobble belong to the current sound; echo / reverb are the shared room.
+const COLOUR = ['drive', 'chorus', 'wobble'];
 const fxKnob = (key, label) => ({
-  label, get: () => engine.fx.values[key], set: (v) => engine.fx.set({ [key]: v }),
+  label,
+  get: () => (COLOUR.includes(key) ? engine.colour : engine.fx).values[key],
+  set: (v) => (COLOUR.includes(key) ? engine.colour : engine.fx).set({ [key]: v }),
 });
 const macroKnob = (key, label) => ({
   label, get: () => engine.macros[key], set: (v) => engine.setMacro(key, v),
@@ -150,9 +172,8 @@ function selectPreset(i) {
   chords.allOff();
   engine.allOff();
   engine.setPreset(PRESETS[presetIndex]);
-  engine.setMacro('brightness', 0.5);
-  engine.setMacro('resonance', 0.5);
   renderKnobs();
+  bus.emit('hint', { text: PRESETS[presetIndex].name, color: PRESETS[presetIndex].color });
 }
 
 // ---------- Chords ----------
@@ -204,6 +225,7 @@ function setMode(m) {
   $('mode-chords').classList.toggle('active', m === 'chords');
   $('mode-notes').classList.toggle('active', m === 'notes');
   $('chord-panel').classList.toggle('dim', m !== 'chords');
+  bus.emit('hint', { text: m === 'chords' ? 'Chords' : 'Notes', color: '#c0caf5' });
 }
 $('mode-chords').onclick = () => setMode('chords');
 $('mode-notes').onclick = () => setMode('notes');
@@ -214,7 +236,8 @@ function panic() {
   chords?.allOff();
   chords?.refs.clear();
   engine?.allOff();
-  engine?.all.forEach((v) => v.done || v.kill());
+  engine?.all.forEach((v) => v.killed || v.kill());
+  sustained.clear();
   showChord(null);
 }
 $('panic').onclick = panic;
@@ -363,7 +386,10 @@ function onPad(note, velocity, isDown) {
     const i = note - PAD_A;
     flashPad(i, isDown);
     bus.emit('pad', { index: i, down: isDown });
-    const action = PAD_ACTIONS[i];
+    const action = isDown ? PAD_PAGES[knobPage][i] : padPressed.get(i);
+    if (!action) return;
+    if (isDown) padPressed.set(i, action);
+    else padPressed.delete(i);
     if (action.tap) {
       if (isDown) {
         action.held = false;
@@ -371,6 +397,7 @@ function onPad(note, velocity, isDown) {
       } else {
         clearTimeout(action.timer);
         if (!action.held) action.tap();
+        else action.up?.();
       }
     } else if (isDown) action.down();
     else action.up?.();
@@ -463,9 +490,16 @@ function ensureEngine() {
       knobs: () => KNOB_PAGES[knobPage],
       page: () => knobPage,
       preset: () => PRESETS[presetIndex],
+      mode: () => mode,
+      sustain: () => sustain,
     });
     stage.show(true); // the stage is the main view; V flips to the settings page
-    window.vibesynth = { engine, seq, looper, chords, stage }; // handy in the devtools console
+    // Handy in the devtools console, and for testing without the MPK plugged in.
+    window.vibesynth = {
+      engine, seq, looper, chords, stage,
+      pad: (i, down) => onPad(PAD_A + i, 100, down),
+      key: (n, down) => (down ? keyDown(n, 100) : keyUp(n)),
+    };
     syncChordSettings();
     selectPreset(presetIndex);
     $('start').classList.add('hidden');
@@ -493,13 +527,48 @@ function velocityCurve(v) {
   return Math.round(45 + (v / 127) * 82);
 }
 
+// Key select: hold pad 6 (sound page) and press a key to make it the home key; tap pad 6 to flip
+// between major and minor.
+let keySelect = false;
+function setKeySelect(on) {
+  keySelect = on;
+  if (on) bus.emit('hint', { text: 'Press a key to choose the key', color: '#e0af68', sticky: true });
+  else bus.emit('hint', null);
+}
+function setKey(tonic, keyMode = $('key-mode').value) {
+  $('key-tonic').value = tonic;
+  $('key-mode').value = keyMode;
+  syncChordSettings();
+  bus.emit('hint', { text: `Key: ${NOTE_NAMES[tonic]} ${keyMode}`, color: '#e0af68', sticky: keySelect });
+}
+function toggleKeyMode() {
+  setKey(+$('key-tonic').value, $('key-mode').value === 'major' ? 'minor' : 'major');
+}
+
+// Sustain: while pad 7 is held (sound page), letting go of keys doesn't stop the notes.
+let sustain = false;
+const sustained = new Set();
+function setSustain(on) {
+  sustain = on;
+  if (!on) {
+    for (const n of sustained) releaseKey(n);
+    sustained.clear();
+  }
+}
+
 function keyDown(n, v) {
   if (!engine || engine.ctx.state !== 'running') return;
+  if (keySelect) return setKey(n % 12);
+  sustained.delete(n);
   if (mode === 'chords') chords.press(n, velocityCurve(v));
   else engine.noteOn(n, velocityCurve(v));
 }
 function keyUp(n) {
-  if (!engine) return;
+  if (!engine || keySelect) return;
+  if (sustain) return sustained.add(n);
+  releaseKey(n);
+}
+function releaseKey(n) {
   if (mode === 'chords') chords.release(n);
   else engine.noteOff(n);
 }

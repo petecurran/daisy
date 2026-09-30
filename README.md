@@ -17,8 +17,12 @@ Open http://localhost:5173 in Chromium, allow MIDI, click to wake the synth.
 - **Notes mode**: plain synth; joystick = pitch bend / vibrato.
 - **Knobs** (pad 5 flips pages). Sound: Voicing, Brightness, Resonance, Drive, Chorus, Tape wobble,
   Echo, Reverb. Drums: Tempo, Busy, Swing, Kit, Drum tone, Room, Pump, Drum level.
-- **Pads bank A**: 1 play/stop drums, 2 fill, 3/4 pattern (hold: time signature), 5 knob page,
-  6 tap tempo, 7 break (hold), 8 looper. **Bank B**: play the drums live.
+- **Pads bank A** change with the knob page (pad 5 flips it):
+  - Sound page: 1 drums · 2 Chords ⇄ Notes · 3/4 previous/next sound · 5 page ·
+    6 Key (hold + press a key sets the key; tap flips major/minor) · 7 sustain (hold) · 8 looper
+  - Drums page: 1 drums · 2 fill · 3/4 groove (hold: time signature) · 5 page · 6 tap tempo ·
+    7 break (hold) · 8 looper
+  - Pad 1 held = stop everything. **Bank B**: play the drums live.
 - **Looper** (pad 8 or R): tap = record from next bar -> play -> add layer -> play…, double-tap = stop,
   hold = undo last layer (clear when stopped). Notes snap to 16ths; each layer keeps its own sound.
 - **← →** change sound, **↑ ↓** voicing.
