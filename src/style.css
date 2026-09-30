@@ -287,3 +287,12 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-
   .deck .deck-row { grid-template-columns: 52px 1fr auto; }
   .deck .status { display: none; }
 }
+
+/* Splash, until the sound is running. */
+.splash {
+  position: absolute; inset: 0; z-index: 5; display: grid; place-content: center; text-align: center;
+  background: radial-gradient(ellipse at 50% 80%, #2a1f3d 0%, #0d0e16 65%); cursor: pointer;
+}
+.splash h1 { margin: 0; font-size: 72px; font-weight: 800; letter-spacing: -2px; color: #ff4fa8; text-shadow: 0 0 40px rgba(255,79,168,0.5); }
+.splash p { color: #737aa2; font-size: 16px; margin-top: 10px; }
+.stage.awake .splash { display: none; }

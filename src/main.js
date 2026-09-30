@@ -472,6 +472,16 @@ function log(line) {
 // ---------- Audio ----------
 
 $('start').onclick = () => ensureEngine();
+$('stage').addEventListener('pointerdown', () => ensureEngine());
+
+// The stage is the home view from the moment the page opens. Audio needs a click or key press
+// unless Chromium was started with --autoplay-policy=no-user-gesture-required (tools/vibesynth.sh),
+// in which case touching the MPK is enough.
+function updateSplash() {
+  const running = engine?.ctx.state === 'running';
+  $('stage').classList.toggle('awake', running);
+  if (engine && !running) document.querySelector('.splash-text').textContent = 'click or press a key to start the sound';
+}
 $('stage-btn').onclick = () => { ensureEngine(); stage.show(true); };
 
 function ensureEngine() {
@@ -493,7 +503,8 @@ function ensureEngine() {
       mode: () => mode,
       sustain: () => sustain,
     });
-    stage.show(true); // the stage is the main view; V flips to the settings page
+    stage.show(true); // the stage is the main view; V flips to the settings page (for debugging)
+    engine.ctx.onstatechange = updateSplash;
     // Handy in the devtools console, and for testing without the MPK plugged in.
     window.vibesynth = {
       engine, seq, looper, chords, stage,
@@ -508,7 +519,8 @@ function ensureEngine() {
     drawScope();
     setInterval(showLatency, 1000);
   }
-  if (engine.ctx.state !== 'running') engine.ctx.resume();
+  if (engine.ctx.state !== 'running') engine.ctx.resume().then(updateSplash);
+  updateSplash();
   return engine;
 }
 
@@ -584,6 +596,7 @@ connectMidi({
     clock?.setOutput(midiOut);
   },
   onRaw({ type, channel, d1, d2 }) {
+    if (!engine) ensureEngine(); // any touch of the MPK wakes the synth
     const kind = { 0x80: 'note off', 0x90: 'note on ', 0xb0: 'CC      ', 0xe0: 'bend    ' }[type] || type.toString(16);
     if (type === 0xe0) log(`${kind} ch${channel + 1}  ${(((d2 << 7) | d1) - 8192)}`);
     else log(`${kind} ch${channel + 1}  ${d1.toString().padStart(3)}  ${d2}`);
@@ -627,6 +640,7 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   if (e.key.toLowerCase() === 'v') { ensureEngine(); return stage.show(); }
+  if (!engine) ensureEngine();
   if (e.key === 'Tab') { e.preventDefault(); return setMode(mode === 'chords' ? 'notes' : 'chords'); }
   if (e.key === ' ') { e.preventDefault(); ensureEngine(); return seq.toggle(); }
   if (e.key === 'ArrowRight') return selectPreset(presetIndex + 1);
