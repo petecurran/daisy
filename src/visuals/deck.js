@@ -1,6 +1,6 @@
 import { KNOB_COLORS } from './palette.js';
 import { KNOB_ICONS, KNOB_LABELS, svg } from './icons.js';
-import { NOTE_NAMES } from '../chords.js';
+import { NOTE_NAMES, SCALES } from '../chords.js';
 
 // The on-screen deck: a slim strip laid out like the MPK. Pads are labelled with what they do on the
 // current knob page (and what they'll do right now); the knobs are small colour rings; the keys are a
@@ -161,10 +161,16 @@ export class Deck {
     this.set('jzon', this.root.querySelector('.joy'), '.on', (joy?.zone ?? 'C') !== 'C');
   }
 
-  // Light the keys that are sounding, in the chord's colour.
+  // Light the keys that are sounding, in the chord's colour. In notes mode the keys that belong to
+  // the current key glow faintly (the home note a little more), so it's clear which ones fit.
   lightKeys(notes, color) {
     const lit = new Set(notes.map((n) => ((n % 24) + 24) % 24));
+    const { chords } = this.src;
+    const guide = this.src.mode() === 'notes' && chords;
+    const scale = guide ? SCALES[chords.key.mode].map((i) => (i + chords.key.tonic) % 12) : [];
     for (const [n, el] of this.keyEls) {
+      this.set(`in${n}`, el, '.inkey', scale.includes(n % 12));
+      this.set(`home${n}`, el, '.home', guide && n % 12 === chords.key.tonic);
       const on = lit.has(n) || (n === 24 && lit.has(0));
       el.classList.toggle('lit', on);
       if (on) el.style.setProperty('--c', `rgb(${color})`);

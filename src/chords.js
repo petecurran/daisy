@@ -1,7 +1,7 @@
 // Orchid-style chord engine: one key picks the root, the joystick picks the chord colour.
 
 export const NOTE_NAMES = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
-const SCALES = {
+export const SCALES = {
   major: [0, 2, 4, 5, 7, 9, 11],
   minor: [0, 2, 3, 5, 7, 8, 10],
 };
@@ -112,17 +112,31 @@ export class ChordPlayer {
     this.held = new Map(); // physical key -> { notes, velocity }
     this.refs = new Map(); // midi note -> count
     this.lastUpper = null;
+    this.lastCenter = null;
   }
 
+  // The register follows the octave of the key that was pressed (middle C = 60 up to B sits around
+  // 64, the octave below an octave lower, ...), so low, middle and high C give low, middle and
+  // high C chords, while chords within an octave still voice-lead into each other.
   chordFor(key) {
     const rootPc = key % 12;
     const c = buildChord(rootPc, this.key, this.zone);
-    const upper = voiceUpper(rootPc, c, 64 + this.voicing, this.lastUpper);
+    const center = 64 + this.voicing + 12 * Math.floor((key - 60) / 12);
+    // Voice-lead from the last chord, moved by whole octaves with the register so a jump to
+    // another octave isn't pulled back towards where the last chord was.
+    let prev = this.lastUpper;
+    if (prev && this.lastCenter != null) {
+      const shift = 12 * Math.round((center - this.lastCenter) / 12);
+      prev = prev.map((n) => n + shift);
+    }
+    const upper = voiceUpper(rootPc, c, center, prev);
     this.lastUpper = upper;
+    this.lastCenter = center;
     const notes = [...upper];
     if (this.bass) {
-      let b = rootPc + 36;
-      if (b < 38) b += 12;
+      let b = key - 12; // root an octave below the key
+      while (b >= upper[0] && b - 12 >= 28) b -= 12; // keep it under the chord
+      while (b < 28) b += 12;
       notes.unshift(b);
     }
     return { notes, name: chordName(rootPc, c) };

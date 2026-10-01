@@ -24,6 +24,7 @@ export class Looper {
     this.start = 0; // global step where the loop begins
     this.length = 0; // loop length in steps
     this.pending = new Map(); // note -> { pos, vel }
+    this.sounding = new Map(); // live notes held right now: note -> vel
     this.lastTap = { time: 0, action: null };
     this.pos = 0;
 
@@ -115,6 +116,7 @@ export class Looper {
   beginOverdub() {
     this.current = this.newLayer();
     this.pending.clear();
+    this.catchHeld(this.nowPos());
     this.setState('overdub');
     return 'overdub';
   }
@@ -220,13 +222,22 @@ export class Looper {
   }
 
   liveOn(note, vel) {
+    this.sounding.set(note, vel);
     if (!this.recording() || !this.seq.playing) return;
     const pos = this.nowPos();
-    if (this.state === 'armed' && pos < this.start - 0.5) return; // still in the count-in
+    // Up to an eighth note early still counts as the first beat (it gets pulled onto it); anything
+    // earlier is the count-in, though if it's still held when recording starts it's caught then.
+    if (this.state === 'armed' && pos < this.start - this.seq.sig.beatSteps / 2) return;
     this.pending.set(note, { pos, vel });
   }
 
+  // Notes already held when recording (or a new layer) starts are part of the take from its start.
+  catchHeld(pos) {
+    for (const [note, vel] of this.sounding) if (!this.pending.has(note)) this.pending.set(note, { pos, vel });
+  }
+
   liveOff(note) {
+    this.sounding.delete(note);
     const p = this.pending.get(note);
     if (!p || !this.recording()) return;
     this.pending.delete(note);
@@ -240,9 +251,10 @@ export class Looper {
   }
 
   addEvent(note, { pos, vel }, endPos) {
-    const on = Math.round(pos - this.start);
+    let on = Math.round(pos - this.start);
+    if (!this.length) on = Math.max(0, on); // a first-take note played early lands on the first beat
     const len = Math.max(1, Math.round(endPos - this.start) - on);
-    const step = this.length ? ((on % this.length) + this.length) % this.length : Math.max(0, on);
+    const step = this.length ? ((on % this.length) + this.length) % this.length : on;
     const e = { step, note, vel, len: this.length ? Math.min(len, this.length) : len };
     this.current.events.push(e);
     // Overdubs are heard on the next pass round the loop.
@@ -255,7 +267,10 @@ export class Looper {
   // ---------- playback: called by the sequencer for every scheduled step ----------
 
   onSchedule(step, t) {
-    if (this.state === 'armed' && step >= this.start) this.setState('recording');
+    if (this.state === 'armed' && step >= this.start) {
+      this.catchHeld(this.start);
+      this.setState('recording');
+    }
     if (!this.hasLoop || !(this.state === 'playing' || this.state === 'overdub')) return;
     if (step < this.start) return;
     const pos = (step - this.start) % this.length;

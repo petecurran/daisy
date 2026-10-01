@@ -6,9 +6,9 @@ import { Deck } from './deck.js';
 import { ICON, KNOB_ICONS, KNOB_LABELS } from './icons.js';
 import { KNOB_COLORS } from './palette.js';
 import { SHIMMER, analyzeChord, chordColor } from './chordColor.js';
+import { ChordLabel } from './chordLabel.js';
 
 const CHORD_GAP_MS = 70; // notes closer together than this belong to the same chord
-const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
 const ICON_PATHS = Object.fromEntries(Object.entries(ICON).map(([k, d]) => [k, new Path2D(d)]));
 
 // Full-screen stage: the Tree Rings (GPU) underneath, a crisp text layer on top, and
@@ -21,6 +21,7 @@ export class Stage {
     this.hudCanvas = root.querySelector('.hud');
     this.h = this.hudCanvas.getContext('2d');
     this.deck = new Deck(root.querySelector('.deck'), src);
+    this.label = new ChordLabel(src);
     try {
       this.glx = createGL(this.glCanvas);
       this.looks = [new Rings(this.glx)];
@@ -84,6 +85,7 @@ export class Stage {
   listen() {
     bus.on('note', (e) => this.onNote(e));
     bus.on('noteoff', (e) => this.onNoteOff(e));
+    bus.on('chord', (e) => this.label.chord(e.name));
     bus.on('drum', (e) => this.onDrum(e));
     bus.on('knob', (e) => { this.popup = { ...e, at: performance.now() }; });
     bus.on('pad', (e) => this.deck.pad(e));
@@ -108,6 +110,7 @@ export class Stage {
 
   onNote({ note, vel, loop }) {
     const now = performance.now() / 1000;
+    if (!loop) this.label.note(note, true);
     let b = this.bursts.findLast((x) => x.loop === loop && !x.ghost && !x.drum);
     if (!b || b.releasedAt != null || (now - b.born) * 1000 > CHORD_GAP_MS) b = this.newBurst(loop, now);
     if (!b.notes.includes(note)) b.notes.push(note);
@@ -119,6 +122,7 @@ export class Stage {
 
   onNoteOff({ note, loop = false }) {
     const now = performance.now() / 1000;
+    if (!loop) this.label.note(note, false);
     for (let i = this.bursts.length - 1; i >= 0; i--) {
       const b = this.bursts[i];
       if (b.loop === loop && b.held.has(note)) {
@@ -311,16 +315,10 @@ export class Stage {
       shadow(true);
     }
 
-    // Top centre: the chord, in its colour.
-    const live = this.bursts.findLast((b) => !b.loop && !b.ghost && !b.drum && b.chord);
-    if (live) {
-      const held = live.held.size > 0;
-      const a = held ? 1 : Math.max(0.3, 1 - (now - live.releasedAt) * 0.25);
-      g.textAlign = 'center';
-      g.font = font(76, 800);
-      g.fillStyle = rgba(live.color, a);
-      g.fillText(live.chord.name, W / 2, pad - 8 * d);
-    }
+    // Top centre: the chord (or, in notes mode, the note), in pixels like the rings.
+    shadow(false);
+    this.label.draw(g, W, pad - 14 * d, d, this.fx());
+    shadow(true);
 
     // Top right: loop.
     if (looper) {

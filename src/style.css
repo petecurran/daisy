@@ -1,3 +1,6 @@
+/* Shrikhand (SIL Open Font License), bundled so the chord lettering works offline. */
+@font-face { font-family: Shrikhand; src: url(fonts/Shrikhand-Regular.woff2) format('woff2'); font-display: block; }
+
 :root {
   --bg: #17120f;
   --panel: #231b16;
@@ -275,6 +278,8 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-
 .deck .strip { display: grid; grid-template-columns: repeat(25, 1fr); gap: 3px; align-items: start; height: 7px; }
 .deck .strip i { height: 7px; border-radius: 3px; background: #24283b; transition: background 0.08s, box-shadow 0.08s; }
 .deck .strip i.black { height: 4px; background: #1c1f2e; }
+.deck .strip i.inkey { background: #3b4261; }
+.deck .strip i.home { background: #737aa2; }
 .deck .strip i.lit { background: var(--c); box-shadow: 0 0 10px var(--c), 0 0 2px var(--c); }
 
 /* Reset the settings page's knob/pad styles inside the deck. */

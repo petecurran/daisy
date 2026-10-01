@@ -17,7 +17,7 @@ so a refresh always gets the latest code).
 
 ## Controls
 
-- **Chords mode** (Tab toggles): a key picks the chord root, the joystick colours it
+- **Chords mode** (Tab toggles): a key picks the chord root and its octave (low C, middle C and high C give low, middle and high C chords), the joystick colours it
   (up = 7th, down = sus4, left = flip major/minor, right = add9, diagonals = combos).
 - **Notes mode**: plain synth; joystick = pitch bend / vibrato.
 - **Knobs** (pad 5 flips pages). Sound: Voicing, Brightness, Resonance, Drive, Chorus, Tape wobble,

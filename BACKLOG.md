@@ -9,3 +9,7 @@
 - [ ] A way to change a loop layer's sound from the MPK (today: settings page dropdown).
 - [ ] Tape tricks for the looper: reverse, half-speed, warble.
 - [ ] Surprise button.
+- [ ] Play along to songs (parked 2026-10-01). Ideas: (1) song charts: paste chords, stage shows
+      current/next chord, drums at the song's tempo and time signature; (2) analyse a local MP3
+      for tempo, beats, key and rough chords, then lock drums/looper to it; (3) strip parts out
+      with Demucs stems and play them yourself.
