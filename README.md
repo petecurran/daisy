@@ -1,6 +1,6 @@
 # daisy
 
-A warm little chord synth for the Akai MPK Mini Mk II, in the browser. One key plays a whole
+A warm little chord synth for the Akai MPK Mini Mk II. One key plays a whole
 chord and the joystick colours it, with built-in drums, a looper and a light show.
 
 Named after "Daisy Bell", the first song a computer ever sang (1961).
