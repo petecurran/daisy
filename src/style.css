@@ -304,3 +304,6 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-
 .splash p { color: #737aa2; font-size: 16px; margin-top: 10px; }
 .splash { transition: opacity 1.1s ease-in; }
 .stage.awake .splash { opacity: 0; pointer-events: none; }
+
+/* No scrollbar while the stage covers the page (the settings page underneath can still scroll). */
+html:has(.stage:not(.hidden)) { overflow: hidden; }
