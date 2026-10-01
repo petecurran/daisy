@@ -110,6 +110,7 @@ export class Looper {
     this.current.events = this.current.events.map((e) => ({ ...e, step: e.step % this.length }));
     this.commit();
     this.setState('playing');
+    this.catchUp();
     return 'close';
   }
 
@@ -224,7 +225,11 @@ export class Looper {
   liveOn(note, vel) {
     this.sounding.set(note, vel);
     if (!this.recording() || !this.seq.playing) return;
-    const pos = this.nowPos();
+    // Notes struck together (a strummed chord spreads them over ~50 ms) share the first one's
+    // timing, so a chord never gets split across two 16ths.
+    const now = performance.now();
+    if (!this.lastOn || now - this.lastOn.at > 80) this.lastOn = { at: now, pos: this.nowPos() };
+    const pos = this.lastOn.pos;
     // Up to an eighth note early still counts as the first beat (it gets pulled onto it); anything
     // earlier is the count-in, though if it's still held when recording starts it's caught then.
     if (this.state === 'armed' && pos < this.start - this.seq.sig.beatSteps / 2) return;
@@ -252,7 +257,9 @@ export class Looper {
 
   addEvent(note, { pos, vel }, endPos) {
     let on = Math.round(pos - this.start);
-    if (!this.length) on = Math.max(0, on); // a first-take note played early lands on the first beat
+    // First take: a note played early, or within the first 16th (coming in a hair late), lands on
+    // the first beat.
+    if (!this.length && pos - this.start < 1) on = 0;
     const len = Math.max(1, Math.round(endPos - this.start) - on);
     const step = this.length ? ((on % this.length) + this.length) % this.length : on;
     const e = { step, note, vel, len: this.length ? Math.min(len, this.length) : len };
@@ -273,6 +280,22 @@ export class Looper {
     }
     if (!this.hasLoop || !(this.state === 'playing' || this.state === 'overdub')) return;
     if (step < this.start) return;
+    this.playStep(step, t);
+  }
+
+  // The sequencer schedules a little ahead, so by the time the loop is closed (often with a tap
+  // that's a touch late) its first step may already have gone by without it. Play those now:
+  // on time if they're still ahead, straight away if they're only just late.
+  catchUp() {
+    const { seq } = this;
+    const ctx = this.engine.ctx;
+    for (let step = this.start + this.length; step < seq.step; step++) {
+      const t = seq.nextTime - (seq.step - step) * seq.stepDur;
+      if (t > ctx.currentTime - 0.25) this.playStep(step, Math.max(t, ctx.currentTime + 0.005));
+    }
+  }
+
+  playStep(step, t) {
     const pos = (step - this.start) % this.length;
     this.pos = pos;
     const stepDur = this.seq.stepDur;

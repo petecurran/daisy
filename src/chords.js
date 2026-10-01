@@ -72,13 +72,13 @@ function intervals(c) {
   return iv;
 }
 
-// Pick an inversion of the upper chord that sits near `center` and moves smoothly from `prev`.
-function voiceUpper(rootPc, c, center, prev) {
+// Pick the inversion of the upper chord that sits nearest `center`.
+function voiceUpper(rootPc, c, center) {
   const pcs = intervals(c).map((i) => (rootPc + i) % 12);
   let best = null;
   for (let rot = 0; rot < pcs.length; rot++) {
     const order = [...pcs.slice(rot), ...pcs.slice(0, rot)];
-    for (let base = center - 18; base <= center + 6; base++) {
+    for (let base = Math.floor(center) - 18; base <= center + 6; base++) {
       if ((base % 12 + 12) % 12 !== order[0]) continue;
       const notes = [base];
       for (const pc of order.slice(1)) {
@@ -87,11 +87,7 @@ function voiceUpper(rootPc, c, center, prev) {
         notes.push(n);
       }
       const mean = notes.reduce((a, b) => a + b, 0) / notes.length;
-      let cost = Math.abs(mean - center);
-      if (prev?.length) {
-        const move = notes.reduce((s, n) => s + Math.min(...prev.map((p) => Math.abs(p - n))), 0);
-        cost += (move / notes.length) * 0.8;
-      }
+      const cost = Math.abs(mean - center);
       if (!best || cost < best.cost) best = { notes, cost };
     }
   }
@@ -111,27 +107,17 @@ export class ChordPlayer {
     this.strumMs = 18;
     this.held = new Map(); // physical key -> { notes, velocity }
     this.refs = new Map(); // midi note -> count
-    this.lastUpper = null;
-    this.lastCenter = null;
   }
 
-  // The register follows the octave of the key that was pressed (middle C = 60 up to B sits around
-  // 64, the octave below an octave lower, ...), so low, middle and high C give low, middle and
-  // high C chords, while chords within an octave still voice-lead into each other.
+  // Chords follow the keyboard: each chord is built up from the key that was pressed (root
+  // position), so one key up is one step up and low, middle and high C are an octave apart. The
+  // voicing knob slides it through its inversions, up or down.
   chordFor(key) {
     const rootPc = key % 12;
     const c = buildChord(rootPc, this.key, this.zone);
-    const center = 64 + this.voicing + 12 * Math.floor((key - 60) / 12);
-    // Voice-lead from the last chord, moved by whole octaves with the register so a jump to
-    // another octave isn't pulled back towards where the last chord was.
-    let prev = this.lastUpper;
-    if (prev && this.lastCenter != null) {
-      const shift = 12 * Math.round((center - this.lastCenter) / 12);
-      prev = prev.map((n) => n + shift);
-    }
-    const upper = voiceUpper(rootPc, c, center, prev);
-    this.lastUpper = upper;
-    this.lastCenter = center;
+    const iv = intervals(c);
+    const center = key + iv.reduce((a, b) => a + b, 0) / iv.length + this.voicing;
+    const upper = voiceUpper(rootPc, c, center);
     const notes = [...upper];
     if (this.bass) {
       let b = key - 12; // root an octave below the key
