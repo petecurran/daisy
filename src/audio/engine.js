@@ -84,7 +84,8 @@ export class Engine {
     }
   }
 
-  noteOn(note, velocity = 100) {
+  // `strike` groups the notes of one strummed chord (so the looper keeps them together).
+  noteOn(note, velocity = 100, strike) {
     if (!this.preset) return;
     const existing = this.voices.get(note);
     if (existing) existing.release(0.3);
@@ -92,7 +93,7 @@ export class Engine {
     const v = new Voice(this, this.preset, note, velocity);
     this.voices.set(note, v);
     this.all.push(v);
-    this.onLiveOn?.(note, velocity);
+    this.onLiveOn?.(note, velocity, strike);
     bus.emit('note', { note, vel: velocity, preset: this.preset, loop: false });
   }
 

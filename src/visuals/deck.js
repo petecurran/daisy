@@ -7,7 +7,7 @@ import { NOTE_NAMES, SCALES } from '../chords.js';
 // light strip that glows in the chord's colour.
 
 const LOOP_PAD = {
-  empty: ['record', 'Record'], armed: ['record', 'Cancel'], recording: ['record', 'Close loop'],
+  empty: ['record', 'Record'], armed: ['record', 'Cancel'], recording: ['record', 'Close loop'], cued: ['loop', 'Cancel'],
   playing: ['loop', 'Add layer'], overdub: ['loop', 'Keep layer'], stopped: ['loop', 'Resume'],
 };
 
@@ -15,12 +15,17 @@ const LOOP_PAD = {
 function padInfo(page, i, s) {
   const { seq, looper, mode, key } = s;
   const drumsOn = seq?.playing && !seq.drumsMuted;
-  if (i === 0) return { icon: drumsOn ? 'stop' : 'play', label: drumsOn ? 'Stop drums' : 'Drums', sub: 'hold: stop all', state: drumsOn ? 'green' : '' };
+  if (i === 0) {
+    if (looper?.hasLoop && (seq?.playing || seq?.paused)) {
+      return { icon: seq.playing ? 'pause' : 'play', label: seq.playing ? 'Pause' : 'Resume', sub: 'hold: stop all', state: seq.playing ? 'green' : 'amber' };
+    }
+    return { icon: drumsOn ? 'stop' : 'play', label: drumsOn ? 'Stop drums' : 'Drums', sub: 'hold: stop all', state: drumsOn ? 'green' : '' };
+  }
   if (i === 4) return { icon: 'sliders', label: page === 'drums' ? 'Drum knobs' : 'Sound knobs', sub: 'tap: flip' };
   if (i === 7) {
     const st = looper?.state ?? 'empty';
     const [icon, label] = LOOP_PAD[st];
-    return { icon, label, sub: st === 'empty' ? 'loop' : 'hold: undo', state: { armed: 'amber', recording: 'red', overdub: 'red', playing: 'green' }[st] ?? '' };
+    return { icon, label, sub: st === 'empty' ? 'loop' : 'hold: undo', state: { armed: 'amber', cued: 'amber', recording: 'red', overdub: 'red', playing: 'green' }[st] ?? '' };
   }
   if (page === 'sound') {
     return [

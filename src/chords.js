@@ -94,6 +94,8 @@ function voiceUpper(rootPc, c, center) {
   return best.notes;
 }
 
+let strikes = 0; // numbers each strummed chord, so the looper can keep its notes together
+
 // Turns key presses + joystick zone into sounding notes on the engine, sharing notes between
 // chords (ref-counted) so changing chord colour only re-strikes the notes that actually change.
 export class ChordPlayer {
@@ -132,7 +134,8 @@ export class ChordPlayer {
     if (this.held.has(key)) this.release(key);
     const { notes, name } = this.chordFor(key);
     this.held.set(key, { notes, velocity, name });
-    notes.forEach((n, i) => this.on(n, velocity, i * this.strumMs));
+    const strike = ++strikes;
+    notes.forEach((n, i) => this.on(n, velocity, i * this.strumMs, strike));
     this.onChange?.(name);
   }
 
@@ -153,7 +156,8 @@ export class ChordPlayer {
       const next = this.chordFor(key);
       const added = next.notes.filter((n) => !h.notes.includes(n));
       const removed = h.notes.filter((n) => !next.notes.includes(n));
-      added.forEach((n, i) => this.on(n, h.velocity * 0.85, i * 8));
+      const strike = ++strikes;
+      added.forEach((n, i) => this.on(n, h.velocity * 0.85, i * 8, strike));
       removed.forEach((n) => this.off(n));
       h.notes = next.notes;
       name = next.name;
@@ -161,16 +165,16 @@ export class ChordPlayer {
     this.onChange?.(name, zone);
   }
 
-  on(note, velocity, delayMs) {
+  on(note, velocity, delayMs, strike) {
     const count = this.refs.get(note) || 0;
     this.refs.set(note, count + 1);
     if (count > 0) return;
     if (delayMs > 0) {
       setTimeout(() => {
-        if (this.refs.get(note)) this.engine.noteOn(note, velocity);
+        if (this.refs.get(note)) this.engine.noteOn(note, velocity, strike);
       }, delayMs);
     } else {
-      this.engine.noteOn(note, velocity);
+      this.engine.noteOn(note, velocity, strike);
     }
   }
 

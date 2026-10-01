@@ -1,11 +1,13 @@
 // Pedal-style note looper, locked to the drum transport.
 //
 // One button (pad 8), like a Boss RC-1:
-//   tap        empty -> record (from the next bar)  -> play -> overdub -> play -> ...
+//   tap        empty -> record (from the next bar) -> play -> overdub (from the top of the loop)
+//              -> play -> ...
 //   double-tap stop (keeps the loop; tap again to restart from the next bar)
 //   hold       undo the last layer (or clear everything when stopped)
 //
-// It records the notes the synth actually plays (after the chord engine), snapped to 16th steps.
+// It records the notes the synth actually plays (after the chord engine): starts snapped to 16th
+// steps, lengths kept exactly as played (so short arp notes stay crisp).
 // Each layer remembers the sound it was played with, and can be switched later.
 
 const DOUBLE_TAP_MS = 350;
@@ -18,7 +20,7 @@ export class Looper {
     this.engine = engine;
     this.seq = seq;
     this.onState = onState;
-    this.state = 'empty'; // empty | armed | recording | playing | overdub | stopped
+    this.state = 'empty'; // empty | armed | recording | playing | cued | overdub | stopped
     this.layers = [];
     this.current = null; // layer being recorded
     this.start = 0; // global step where the loop begins
@@ -28,7 +30,7 @@ export class Looper {
     this.lastTap = { time: 0, action: null };
     this.pos = 0;
 
-    engine.onLiveOn = (note, vel) => this.liveOn(note, vel);
+    engine.onLiveOn = (note, vel, strike) => this.liveOn(note, vel, strike);
     engine.onLiveOff = (note) => this.liveOff(note);
   }
 
@@ -66,7 +68,8 @@ export class Looper {
       case 'empty': return this.arm();
       case 'armed':
       case 'recording': return this.close();
-      case 'playing': return this.beginOverdub();
+      case 'playing': return this.cueOverdub();
+      case 'cued': this.current = null; this.setState('playing'); return 'cancel';
       case 'overdub': return this.endOverdub();
       case 'stopped': return this.resume();
     }
@@ -74,7 +77,7 @@ export class Looper {
 
   // Second tap undoes whatever the first tap just started, then stops.
   doubleTap() {
-    if (this.state === 'overdub') this.current = null;
+    if (this.state === 'overdub' || this.state === 'cued') this.current = null;
     if (this.state === 'armed' || this.state === 'recording') return this.clear();
     this.stop();
   }
@@ -114,12 +117,13 @@ export class Looper {
     return 'close';
   }
 
-  beginOverdub() {
+  // A new layer waits for the top of the loop, like the first take waits for the bar.
+  cueOverdub() {
     this.current = this.newLayer();
     this.pending.clear();
-    this.catchHeld(this.nowPos());
-    this.setState('overdub');
-    return 'overdub';
+    this.layerStart = this.start + Math.ceil((this.seq.step - this.start) / this.length) * this.length;
+    this.setState('cued');
+    return 'cue';
   }
 
   endOverdub() {
@@ -148,7 +152,7 @@ export class Looper {
   }
 
   undo() {
-    if (this.state === 'overdub') {
+    if (this.state === 'overdub' || this.state === 'cued') {
       this.current = null;
       this.pending.clear();
       this.setState('playing');
@@ -219,20 +223,28 @@ export class Looper {
   }
 
   recording() {
-    return this.current && (this.state === 'armed' || this.state === 'recording' || this.state === 'overdub');
+    return this.current && ['armed', 'recording', 'cued', 'overdub'].includes(this.state);
   }
 
-  liveOn(note, vel) {
+  // Where the take being recorded begins: the first bar, or the top of the loop for a new layer.
+  get takeStart() {
+    if (this.state === 'armed' || this.state === 'recording') return this.start;
+    if (this.state === 'cued' || this.state === 'overdub') return this.layerStart;
+    return null;
+  }
+
+  liveOn(note, vel, strike) {
     this.sounding.set(note, vel);
     if (!this.recording() || !this.seq.playing) return;
-    // Notes struck together (a strummed chord spreads them over ~50 ms) share the first one's
-    // timing, so a chord never gets split across two 16ths.
-    const now = performance.now();
-    if (!this.lastOn || now - this.lastOn.at > 80) this.lastOn = { at: now, pos: this.nowPos() };
-    const pos = this.lastOn.pos;
+    // The notes of one strummed chord (spread over ~50 ms) share the first one's timing, so a
+    // chord never gets split across two 16ths.
+    let pos = this.nowPos();
+    if (strike != null && this.lastStrike?.id === strike) pos = this.lastStrike.pos;
+    else this.lastStrike = { id: strike, pos };
     // Up to an eighth note early still counts as the first beat (it gets pulled onto it); anything
     // earlier is the count-in, though if it's still held when recording starts it's caught then.
-    if (this.state === 'armed' && pos < this.start - this.seq.sig.beatSteps / 2) return;
+    const waiting = this.state === 'armed' || this.state === 'cued';
+    if (waiting && pos < this.takeStart - this.seq.sig.beatSteps / 2) return;
     this.pending.set(note, { pos, vel });
   }
 
@@ -256,16 +268,17 @@ export class Looper {
   }
 
   addEvent(note, { pos, vel }, endPos) {
-    let on = Math.round(pos - this.start);
-    // First take: a note played early, or within the first 16th (coming in a hair late), lands on
-    // the first beat.
-    if (!this.length && pos - this.start < 1) on = 0;
-    const len = Math.max(1, Math.round(endPos - this.start) - on);
+    const len = Math.max(0.1, endPos - pos); // in steps, exactly as long as it was held
+    // A note played early, or within the first 16th of a take (coming in a hair late), lands on
+    // the take's first beat.
+    const from = this.takeStart;
+    if (from != null && pos - from < 1) pos = from;
+    const on = Math.round(pos - this.start);
     const step = this.length ? ((on % this.length) + this.length) % this.length : on;
     const e = { step, note, vel, len: this.length ? Math.min(len, this.length) : len };
     this.current.events.push(e);
     // Overdubs are heard on the next pass round the loop.
-    if (this.state === 'overdub') {
+    if (this.state === 'overdub' || this.state === 'cued') {
       if (!this.current.byStep.has(step)) this.current.byStep.set(step, []);
       this.current.byStep.get(step).push(e);
     }
@@ -277,6 +290,10 @@ export class Looper {
     if (this.state === 'armed' && step >= this.start) {
       this.catchHeld(this.start);
       this.setState('recording');
+    }
+    if (this.state === 'cued' && step >= this.layerStart) {
+      this.catchHeld(this.layerStart);
+      this.setState('overdub');
     }
     if (!this.hasLoop || !(this.state === 'playing' || this.state === 'overdub')) return;
     if (step < this.start) return;
@@ -303,7 +320,7 @@ export class Looper {
     for (const layer of layers) {
       if (layer.muted) continue;
       for (const e of layer.byStep.get(pos) || []) {
-        this.engine.playNote(e.note, e.vel, layer.preset, t, e.len * stepDur - 0.01);
+        this.engine.playNote(e.note, e.vel, layer.preset, t, Math.max(0.02, e.len * stepDur - 0.01));
       }
     }
   }

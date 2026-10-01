@@ -300,7 +300,7 @@ export class Stage {
       g.fillText('BPM', pad + bw + 8 * d, pad + 16 * d);
       g.font = font(15, 600);
       g.fillStyle = '#a9b1d6';
-      g.fillText(`${seq.sigId} · ${seq.pattern.name} · ${engine.drums.kit.name}${seq.drumsMuted ? ' · muted' : on ? '' : ' · stopped'}`, pad, pad + 44 * d);
+      g.fillText(`${seq.sigId} · ${seq.pattern.name} · ${engine.drums.kit.name}${seq.drumsMuted ? ' · muted' : on ? '' : seq.paused ? ' · paused' : ' · stopped'}`, pad, pad + 44 * d);
       const { barSteps, beatSteps } = seq.sig;
       const inBar = seq.playing && this.step ? this.step.inBar : -1;
       shadow(false);
@@ -323,8 +323,8 @@ export class Stage {
     // Top right: loop.
     if (looper) {
       const st = looper.state;
-      const label = { empty: 'No loop yet', armed: 'Get ready', recording: '● Recording', playing: '▶ Looping', overdub: '● Adding layer', stopped: '■ Loop paused' }[st];
-      const col = { empty: '#565f89', armed: '#e0af68', recording: '#f7768e', playing: '#9ece6a', overdub: '#f7768e', stopped: '#737aa2' }[st];
+      const label = { empty: 'No loop yet', armed: 'Get ready', cued: 'Layer from the top…', recording: '● Recording', playing: seq?.paused ? '❚❚ Paused' : '▶ Looping', overdub: '● Adding layer', stopped: '■ Loop stopped' }[st];
+      const col = { empty: '#565f89', armed: '#e0af68', cued: '#e0af68', recording: '#f7768e', playing: '#9ece6a', overdub: '#f7768e', stopped: '#737aa2' }[st];
       g.textAlign = 'right';
       g.font = font(20, 800);
       g.fillStyle = col;

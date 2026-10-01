@@ -28,9 +28,10 @@ so a refresh always gets the latest code).
     6 Key (hold + press a key sets the key; tap flips major/minor) · 7 sustain (hold) · 8 looper
   - Drums page: 1 drums · 2 fill · 3/4 groove (hold: time signature) · 5 page · 6 tap tempo ·
     7 break (hold) · 8 looper
-  - Pad 1 held = stop everything. **Bank B**: play the drums live.
-- **Looper** (pad 8 or R): tap = record from next bar -> play -> add layer -> play…, double-tap = stop,
-  hold = undo last layer (clear when stopped). Notes snap to 16ths; each layer keeps its own sound.
+  - With a loop going, pad 1 (or Space) **pauses** drums and loop on the spot and carries on from
+    the same place. Pad 1 held = stop everything. **Bank B**: play the drums live.
+- **Looper** (pad 8 or R): tap = record from next bar -> play -> add a layer (starts at the top of the loop) -> play…, double-tap = stop,
+  hold = undo last layer (clear when stopped). Note starts snap to 16ths (lengths are kept as played); each layer keeps its own sound.
 - **← →** change sound, **↑ ↓** voicing.
 
 ## Stage view (visuals)

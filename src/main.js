@@ -366,14 +366,20 @@ function stopEverything() {
   renderDrums();
 }
 
-// With a loop going, the transport has to keep running, so Play/Stop just mutes the drums.
+// With a loop going, Play/Stop pauses everything on the spot (drums and loop freeze together and
+// carry on from the same place); otherwise it just starts and stops the drums.
 function toggleDrums() {
-  if (looper.hasLoop && seq.playing) {
-    seq.drumsMuted = !seq.drumsMuted;
-    renderDrums();
+  if (looper.hasLoop && (seq.playing || seq.paused)) {
+    if (seq.playing) {
+      seq.pause();
+      engine.stopLoopVoices();
+    } else {
+      seq.start();
+    }
   } else {
     seq.toggle();
   }
+  renderDrums();
 }
 $('drum-play').onclick = () => { ensureEngine(); toggleDrums(); };
 $('drum-fill').onclick = () => seq?.playing && seq.queueFill();
@@ -413,7 +419,8 @@ const LOOP_STATES = {
   empty: ['Empty', 'Pad 8 (or R) to record. Recording starts on the next bar.'],
   armed: ['Get ready…', 'Recording starts on the next bar. Tap again to cancel.'],
   recording: ['Recording', 'Tap pad 8 at the end of your phrase to close the loop.'],
-  playing: ['Playing', 'Tap to add a layer (pick a new sound first!). Hold to undo. Double-tap to stop.'],
+  playing: ['Playing', 'Tap to add a layer from the top of the loop (pick a new sound first!). Hold to undo. Double-tap to stop. Pad 1 pauses.'],
+  cued: ['Get ready…', 'The new layer starts at the top of the loop. Tap again to cancel.'],
   overdub: ['Adding layer', 'Tap to keep this layer. Hold to throw it away.'],
   stopped: ['Stopped', 'Tap to play from the next bar. Hold to clear everything.'],
 };
@@ -431,7 +438,7 @@ function renderLooper() {
   const list = $('loop-layers');
   list.innerHTML = '';
   const rows = [...looper.layers];
-  if (looper.current && looper.state !== 'armed') rows.push({ ...looper.current, recording: true });
+  if (looper.current && looper.state !== 'armed' && looper.state !== 'cued') rows.push({ ...looper.current, recording: true });
   rows.forEach((l, i) => {
     const row = document.createElement('div');
     row.className = 'layer' + (l.muted ? ' muted' : '') + (l.recording ? ' rec' : '');
@@ -650,7 +657,7 @@ window.addEventListener('keydown', (e) => {
   if (e.key.toLowerCase() === 'v') { ensureEngine(); return stage.show(); }
   if (!engine) ensureEngine();
   if (e.key === 'Tab') { e.preventDefault(); return setMode(mode === 'chords' ? 'notes' : 'chords'); }
-  if (e.key === ' ') { e.preventDefault(); ensureEngine(); return seq.toggle(); }
+  if (e.key === ' ') { e.preventDefault(); ensureEngine(); return toggleDrums(); }
   if (e.key === 'ArrowRight') return selectPreset(presetIndex + 1);
   if (e.key === 'ArrowLeft') return selectPreset(presetIndex - 1);
   if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {

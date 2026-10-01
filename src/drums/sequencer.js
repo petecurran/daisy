@@ -53,10 +53,12 @@ export class Sequencer {
     this.setPattern(list[(i + dir + list.length) % list.length]);
   }
 
+  // From the top, or (after pause) from exactly where it was frozen.
   start() {
     if (this.playing) return;
     this.playing = true;
-    this.step = 0;
+    if (!this.paused) this.step = 0;
+    this.paused = false;
     this.nextTime = this.ctx.currentTime + 0.06;
     this.onStart?.(this.nextTime);
     this.timer = setInterval(() => this.tick(), TICK_MS);
@@ -64,8 +66,17 @@ export class Sequencer {
     this.onState?.();
   }
 
+  // Freeze on the spot: the loop and the bar position wait here until start().
+  pause() {
+    if (!this.playing) return;
+    this.stop();
+    this.paused = true;
+    this.onState?.();
+  }
+
   stop() {
     this.playing = false;
+    this.paused = false;
     this.drumsMuted = false;
     clearInterval(this.timer);
     this.fill = null;
