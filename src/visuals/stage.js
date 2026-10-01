@@ -38,6 +38,13 @@ export class Stage {
     this.lookPopupAt = -1e9;
     this.step = null;
     addEventListener('resize', () => this.resize());
+    // If the graphics driver resets, wait for the context to come back and rebuild the shaders.
+    this.glCanvas.addEventListener('webglcontextlost', (e) => e.preventDefault());
+    this.glCanvas.addEventListener('webglcontextrestored', () => {
+      this.glx = createGL(this.glCanvas);
+      this.looks = [new Rings(this.glx)];
+      this.resize();
+    });
     this.listen();
   }
 
@@ -101,7 +108,7 @@ export class Stage {
 
   onNote({ note, vel, loop }) {
     const now = performance.now() / 1000;
-    let b = this.bursts.findLast((x) => x.loop === loop && !x.ghost);
+    let b = this.bursts.findLast((x) => x.loop === loop && !x.ghost && !x.drum);
     if (!b || b.releasedAt != null || (now - b.born) * 1000 > CHORD_GAP_MS) b = this.newBurst(loop, now);
     if (!b.notes.includes(note)) b.notes.push(note);
     b.held.add(note);
@@ -128,6 +135,7 @@ export class Stage {
       case 'kick':
         this.pulse = Math.min(1.5, this.pulse + vel);
         rings?.kick(vel); // a bright ripple runs out through the rings
+        this.kickRing(vel);
         break;
       case 'snare':
       case 'clap':
@@ -141,6 +149,18 @@ export class Stage {
         this.shimmer = Math.min(1.5, this.shimmer + (sound === 'ohh' ? 0.6 : 0.25) * vel); // glitter
         break;
     }
+  }
+
+  // With no chord held, each kick sends out a dim ring in the last chord's colour, so the drums
+  // alone keep the picture alive instead of every ring drifting off and leaving it dark.
+  kickRing(vel) {
+    if (this.bursts.some((b) => !b.drum && b.held.size)) return;
+    const last = this.bursts.findLast((b) => !b.drum && b.color);
+    const now = performance.now() / 1000;
+    this.bursts.push({
+      notes: [], held: new Set(), born: now, releasedAt: now, vel, loop: false, ghost: 0, drum: true,
+      seed: Math.random() * 100, color: last?.color ?? [90, 110, 220], chord: last?.chord ?? null,
+    });
   }
 
   // ---------- frame ----------
@@ -167,6 +187,16 @@ export class Stage {
   frame(tms) {
     if (!this.visible) { this.raf = null; return; }
     this.raf = requestAnimationFrame((t) => this.frame(t));
+    try {
+      this.draw(tms);
+    } catch (e) {
+      // Never let one bad frame stop the visuals for good; log it (once a second at most).
+      if (!this.lastErrorAt || tms - this.lastErrorAt > 1000) console.error('stage frame', e);
+      this.lastErrorAt = tms;
+    }
+  }
+
+  draw(tms) {
     const dt = Math.min(0.04, (tms - this.last) / 1000);
     this.last = tms;
     const now = tms / 1000;
@@ -189,7 +219,10 @@ export class Stage {
     this.pulse *= 0.02 ** dt;
     this.shimmer *= 0.05 ** dt;
     this.flash *= 0.01 ** dt;
-    this.bursts = this.bursts.filter((b) => b.held.size || now - (b.releasedAt ?? now) < 40);
+    // Forget old chords, but always keep the most recent one: its band fills the screen, so the
+    // stage never goes black between ideas.
+    const newest = this.bursts.findLast((b) => !b.drum && !b.ghost);
+    this.bursts = this.bursts.filter((b) => b === newest || b.held.size || now - (b.releasedAt ?? now) < 40);
     if (this.bursts.length > 40) this.bursts.splice(0, this.bursts.length - 40);
   }
 
@@ -203,7 +236,7 @@ export class Stage {
     for (let i = this.bursts.length - 1; i >= 0 && rings.length < 32; i--) {
       const b = this.bursts[i];
       if (b.ghost || !b.color) continue;
-      const alive = b.held.size ? 1 : Math.exp(-(now - b.releasedAt) / 6);
+      const alive = b.drum ? 0.3 * Math.exp(-(now - b.born) / 4) : b.held.size ? 1 : Math.exp(-(now - b.releasedAt) / 6);
       rings.push({
         radius: (now - b.born) * speed + 14 * this.dpr, color: b.color, alive,
         seed: b.seed, sparkle: SHIMMER[b.chord?.type] ?? 0,
@@ -279,7 +312,7 @@ export class Stage {
     }
 
     // Top centre: the chord, in its colour.
-    const live = this.bursts.findLast((b) => !b.loop && !b.ghost && b.chord);
+    const live = this.bursts.findLast((b) => !b.loop && !b.ghost && !b.drum && b.chord);
     if (live) {
       const held = live.held.size > 0;
       const a = held ? 1 : Math.max(0.3, 1 - (now - live.releasedAt) * 0.25);

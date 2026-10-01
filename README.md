@@ -12,7 +12,8 @@ Starts the local server and opens VibeSynth full-screen in its own Chromium app 
 MPK (or press any key) to start; that window is allowed to start sound without a click. Allow MIDI
 the first time. **V** flips to the settings/debug page.
 
-Or manually: `python3 -m http.server 5173 --bind 127.0.0.1` and open http://localhost:5173.
+Or manually: `python3 tools/serve.py` and open http://localhost:5173 (this server disables caching,
+so a refresh always gets the latest code).
 
 ## Controls
 

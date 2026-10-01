@@ -510,6 +510,7 @@ function ensureEngine() {
       engine, seq, looper, chords, stage,
       pad: (i, down) => onPad(PAD_A + i, 100, down),
       key: (n, down) => (down ? keyDown(n, 100) : keyUp(n)),
+      cc: (cc, value) => midiHandlers.onCC(cc, value),
     };
     syncChordSettings();
     selectPreset(presetIndex);
@@ -585,7 +586,7 @@ function releaseKey(n) {
   else engine.noteOff(n);
 }
 
-connectMidi({
+const midiHandlers = {
   onDevices(names) {
     const mpk = names.find((n) => /mpk/i.test(n));
     $('midi-status').textContent = names.length ? `MIDI: ${mpk || names.join(', ')}` : 'MIDI: no devices';
@@ -627,7 +628,8 @@ connectMidi({
     showKnob(cc - 1);
     bus.emit('knob', { index: cc - 1, page: knobPage, value: v });
   },
-}).catch((err) => {
+};
+connectMidi(midiHandlers).catch((err) => {
   $('midi-status').textContent = `MIDI: ${err.message}`;
 });
 

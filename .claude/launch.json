@@ -4,7 +4,7 @@
     {
       "name": "vibesynth",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "5173", "--bind", "127.0.0.1"],
+      "runtimeArgs": ["tools/serve.py", "5173"],
       "port": 5173
     }
   ]
