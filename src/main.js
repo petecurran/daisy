@@ -8,6 +8,7 @@ import { connectMidi } from './midi.js';
 import { Looper } from './looper.js';
 import { bus } from './bus.js';
 import { Stage } from './visuals/stage.js';
+import { Logo } from './visuals/logo.js';
 
 // MPK Mini Mk II, as reprogrammed by tools/mpk-setup.py:
 //   knobs K1-K8 = CC1-8, joystick X = pitch bend, joystick up = CC17 / down = CC16,
@@ -475,13 +476,14 @@ $('start').onclick = () => ensureEngine();
 $('stage').addEventListener('pointerdown', () => ensureEngine());
 
 // The stage is the home view from the moment the page opens. Audio needs a click or key press
-// unless Chromium was started with --autoplay-policy=no-user-gesture-required (tools/vibesynth.sh),
+// unless Chromium was started with --autoplay-policy=no-user-gesture-required (tools/daisy.sh),
 // in which case touching the MPK is enough.
 function updateSplash() {
   const running = engine?.ctx.state === 'running';
   $('stage').classList.toggle('awake', running);
   if (engine && !running) document.querySelector('.splash-text').textContent = 'click or press a key to start the sound';
 }
+const logo = new Logo(document.querySelector('.splash'));
 $('stage-btn').onclick = () => { ensureEngine(); stage.show(true); };
 
 function ensureEngine() {
@@ -506,7 +508,7 @@ function ensureEngine() {
     stage.show(true); // the stage is the main view; V flips to the settings page (for debugging)
     engine.ctx.onstatechange = updateSplash;
     // Handy in the devtools console, and for testing without the MPK plugged in.
-    window.vibesynth = {
+    window.daisy = {
       engine, seq, looper, chords, stage,
       pad: (i, down) => onPad(PAD_A + i, 100, down),
       key: (n, down) => (down ? keyDown(n, 100) : keyUp(n)),
@@ -597,7 +599,8 @@ const midiHandlers = {
     clock?.setOutput(midiOut);
   },
   onRaw({ type, channel, d1, d2 }) {
-    if (!engine) ensureEngine(); // any touch of the MPK wakes the synth
+    // Keys and pads wake the synth; until then knobs and the joystick play with the splash logo.
+    if (!engine && (type === 0x90 || type === 0x80)) ensureEngine();
     const kind = { 0x80: 'note off', 0x90: 'note on ', 0xb0: 'CC      ', 0xe0: 'bend    ' }[type] || type.toString(16);
     if (type === 0xe0) log(`${kind} ch${channel + 1}  ${(((d2 << 7) | d1) - 8192)}`);
     else log(`${kind} ch${channel + 1}  ${d1.toString().padStart(3)}  ${d2}`);
@@ -612,6 +615,7 @@ const midiHandlers = {
   },
   onPitchBend(amt) {
     joy.x = amt;
+    logo.joystick(joy.x, joy.up - joy.down);
     if (mode === 'chords') updateJoystick();
     else engine?.pitchBend(amt);
   },
@@ -619,10 +623,12 @@ const midiHandlers = {
     const v = value / 127;
     if (cc === JOY_UP_CC || cc === JOY_DOWN_CC) {
       if (cc === JOY_UP_CC) joy.up = v; else joy.down = v;
+      logo.joystick(joy.x, joy.up - joy.down);
       if (mode === 'chords') updateJoystick();
       else engine?.modWheel(Math.max(joy.up, joy.down));
       return;
     }
+    if (cc >= 1 && cc <= 8) logo.knob(cc - 1, v);
     if (!engine || cc < 1 || cc > 8) return;
     KNOB_PAGES[knobPage][cc - 1].set(v);
     showKnob(cc - 1);

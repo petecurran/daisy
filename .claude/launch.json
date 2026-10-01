@@ -2,7 +2,7 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "vibesynth",
+      "name": "daisy",
       "runtimeExecutable": "python3",
       "runtimeArgs": ["tools/serve.py", "5173"],
       "port": 5173

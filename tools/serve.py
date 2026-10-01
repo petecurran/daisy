@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local server for VibeSynth.
+"""Local server for daisy.
 
 Like `python3 -m http.server`, with one twist so the browser can never run stale code: the page
 is served with its code under a versioned path (/v/<version>/src/...), where the version changes

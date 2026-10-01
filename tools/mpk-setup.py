@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Reprogram an Akai MPK Mini Mk II for VibeSynth (or restore the factory Program 1).
+"""Reprogram an Akai MPK Mini Mk II for daisy (or restore the factory Program 1).
 
   python3 tools/mpk-setup.py            # joystick up/down -> CC17/CC16, pads -> MIDI ch 10,
-                                        # arp/note-repeat follow VibeSynth's clock
+                                        # arp/note-repeat follow daisy's clock
   python3 tools/mpk-setup.py --restore  # write back the backup in mpk-backup-factory.txt
 
 Writes Program 1 (saved) and RAM (live). Protocol from soyersoyer/sysex-controls:

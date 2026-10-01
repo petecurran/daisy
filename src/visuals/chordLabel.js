@@ -1,6 +1,7 @@
 import { NOTE_NAMES } from '../chords.js';
 import { analyzeChord, chordColor } from './chordColor.js';
 import { pitchColor, HOT_PINK } from './palette.js';
+import { FONT, hash, fontReady, rasterText } from './pixelText.js';
 
 // The chord name at the top of the stage: 70s record-sleeve lettering (Shrikhand) built from the
 // same square pixels as the rings, with a "sunset stripes" shadow stacked behind it: cream on top,
@@ -9,7 +10,6 @@ import { pitchColor, HOT_PINK } from './palette.js';
 // slip and run hot, the kick swells it, the hats make the front glint.
 // In notes mode it's just the note (or the chord, once three or more notes are held).
 
-const FONT = 'Shrikhand';
 const CREAM = [246, 231, 200];
 const STRIPES = [[224, 175, 104], [255, 158, 100], [200, 85, 61], [120, 52, 38]]; // after the chord colour
 const LEAVE_S = 0.6;
@@ -17,7 +17,6 @@ const LEAVE_S = 0.6;
 // Plain # and b like a chord chart (the font has no ♯ or ♭).
 const plain = (s) => s.replace('♭', 'b');
 const pcName = (pc) => NOTE_NAMES[((pc % 12) + 12) % 12];
-const hash = (a, b = 0) => { const s = Math.sin(a * 12.9898 + b * 78.233) * 43758.5453; return s - Math.floor(s); };
 const mix = (a, b, k) => a.map((v, i) => Math.round(v + (b[i] - v) * k));
 const rgb = (c) => `rgb(${c[0]},${c[1]},${c[2]})`;
 const clamp = (v) => Math.max(0, Math.min(1, v));
@@ -78,35 +77,11 @@ export class ChordLabel {
   // finer pixels to stay readable.
   pixelate(card, cell, d) {
     card.cell = cell;
-    card.fontReady = document.fonts?.check(`40px ${FONT}`) ?? true;
-    const root = this.raster(card.root, 116 * d, cell, 0, 0);
-    const sup = card.sup ? this.raster(card.sup, 66 * d, Math.max(2, Math.round(cell * 0.6)), root.w + 4 * d, 10 * d) : { w: 0, px: [] };
+    card.fontReady = fontReady();
+    const root = rasterText(card.root, 116 * d, cell, 0, 0);
+    const sup = card.sup ? rasterText(card.sup, 66 * d, Math.max(2, Math.round(cell * 0.6)), root.w + 4 * d, 10 * d) : { w: 0, px: [] };
     const half = (root.w + sup.w + 4 * d) / 2;
     card.pixels = [...root.px, ...sup.px.map((p) => ({ ...p, small: true }))].map((p) => ({ ...p, x: p.x - half }));
-  }
-
-  raster(text, px, cell, ox, oy) {
-    const c = document.createElement('canvas');
-    const g = c.getContext('2d', { willReadFrequently: true });
-    const font = `${px}px ${FONT}, Inter, sans-serif`;
-    g.font = font;
-    const w = Math.ceil(g.measureText(text).width);
-    c.width = Math.ceil(w + px * 0.3); // Shrikhand leans right, past its advance width
-    c.height = Math.ceil(px * 1.35);
-    g.font = font;
-    g.textBaseline = 'top';
-    g.fillStyle = '#fff';
-    g.fillText(text, 0, 0);
-    const data = g.getImageData(0, 0, c.width, c.height).data;
-    const at = (x, y) => data[(Math.min(c.height - 1, y | 0) * c.width + Math.min(c.width - 1, x | 0)) * 4 + 3];
-    const out = [];
-    for (let y = 0; y < c.height; y += cell) {
-      for (let x = 0; x < c.width; x += cell) {
-        const cover = at(x + cell * 0.3, y + cell * 0.3) + at(x + cell * 0.7, y + cell * 0.3) + at(x + cell * 0.3, y + cell * 0.7) + at(x + cell * 0.7, y + cell * 0.7);
-        if (cover > 2 * 255) out.push({ x: ox + x, y: oy + y, row: Math.round((oy + y) / cell), r: hash(ox + x, oy + y), cell, size: cell * 0.82 });
-      }
-    }
-    return { w, px: out };
   }
 
   draw(g, W, top, d, fx) {
@@ -125,7 +100,7 @@ export class ChordLabel {
 
   paint(g, card, W, top, d, fx, now) {
     const cell = Math.max(3, Math.round(5 * d));
-    if (card.cell !== cell || (!card.fontReady && document.fonts?.check(`40px ${FONT}`))) this.pixelate(card, cell, d);
+    if (card.cell !== cell || (!card.fontReady && fontReady())) this.pixelate(card, cell, d);
     const t = now - card.at;
     const leave = card.leftAt != null ? clamp((now - card.leftAt) / LEAVE_S) : 0;
     const alpha = (card.releasedAt == null ? 1 : Math.max(0.35, 1 - (now - card.releasedAt) * 0.25)) * (1 - leave);
@@ -153,6 +128,7 @@ export class ChordLabel {
       g.fillStyle = rgb(col);
       for (const p of card.pixels) {
         if (p.small && k > 1) continue; // the small chord type keeps just one stripe, to stay readable
+        if (k > 0 && p.near <= k) continue; // hidden behind a layer in front
         const arrive = clamp((t - delay - p.r * 0.12) / 0.2);
         if (arrive <= 0) continue;
         const [x, y] = place(p, arrive);
