@@ -515,7 +515,12 @@ function ensureEngine() {
     jam = new Jam(engine, seq, looper, { key: () => chords.key, setKey, stage: () => stage });
     seq.onSchedule = (step, t) => {
       looper.onSchedule(step, t);
-      jam.onSchedule(step, t);
+      try {
+        jam.onSchedule(step, t);
+      } catch (e) {
+        console.error('solo', e); // a bad solo must never stall the drums and loop
+        jam.stop();
+      }
     };
     stage = new Stage($('stage'), {
       engine, seq, looper, chords, joy,

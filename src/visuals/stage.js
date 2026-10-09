@@ -36,6 +36,7 @@ export class Stage {
     this.look = 0;
     this.bursts = [];
     this.pulses = []; // Claude's solo notes, bending the rings as they travel out
+    this.captures = new Set(); // films of the stage being made
     this.pulse = 0;
     this.shimmer = 0;
     this.flash = 0;
@@ -214,12 +215,13 @@ export class Stage {
     c.width = Math.round(this.W * scale);
     c.height = Math.round(this.H * scale);
     const g = c.getContext('2d');
-    this.capture = () => {
+    const copy = () => {
       g.drawImage(this.glCanvas, 0, 0, c.width, c.height);
       g.drawImage(this.hudCanvas, 0, 0, c.width, c.height);
     };
+    this.captures.add(copy); // two films can overlap while one rings out
     const stream = c.captureStream(fps);
-    return { stream, stop: () => { this.capture = null; stream.getTracks().forEach((t) => t.stop()); } };
+    return { stream, stop: () => { this.captures.delete(copy); stream.getTracks().forEach((t) => t.stop()); } };
   }
 
   // ---------- frame ----------
@@ -267,7 +269,7 @@ export class Stage {
     look?.render(dt, now, fx, rings, [this.originCss[0] * this.dpr, this.H - this.originCss[1] * this.dpr], this.pulseList(now));
 
     this.hud(now, fx);
-    this.capture?.(); // filming a solo: copy the frame while it's still there
+    for (const copy of this.captures) copy(); // filming a solo: copy the frame while it's still there
     this.deck.update({ sustain: this.src.sustain?.() });
     const live = this.bursts.findLast((b) => !b.loop && !b.ghost && b.held.size);
     this.deck.lightKeys(live ? [...live.held] : [], live?.color ?? [0, 0, 0], this.src.loopSlots?.());

@@ -25,7 +25,7 @@ import urllib.parse
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 RECORDINGS_MB = 300  # past this, the oldest recordings make way
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 5173
-JAM = os.path.abspath(sys.argv[2]) if len(sys.argv) > 2 else os.path.join(ROOT, 'jam')
+JAM = os.path.realpath(sys.argv[2] if len(sys.argv) > 2 else os.path.join(ROOT, 'jam'))
 
 
 def version():
@@ -37,6 +37,14 @@ def version():
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
+    # Only this machine's own pages: a web page elsewhere (or one that rebinds its DNS name to
+    # 127.0.0.1) mustn't be able to read the jam folder or write into it.
+    def local(self):
+        host = (self.headers.get('Host') or '').rsplit(':', 1)[0]
+        origin = self.headers.get('Origin')
+        ok_origin = origin is None or re.fullmatch(r'https?://(localhost|127\.0\.0\.1)(:\d+)?', origin)
+        return host in ('localhost', '127.0.0.1') and ok_origin
+
     def end_headers(self):
         self.send_header('Cache-Control', 'no-store')
         super().end_headers()
@@ -52,6 +60,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
+        if not self.local():
+            return self.reply(403)
         path, _, query = self.path.partition('?')
         if path in ('/', '/index.html'):
             with open(os.path.join(ROOT, 'index.html'), encoding='utf-8') as f:
@@ -67,12 +77,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.path = re.sub(r'^/v/[^/]+/', '/', self.path)
         super().do_GET()
 
-    # /jam/... is the jam folder (which may live elsewhere, for testing).
+    # /jam/... is the jam folder (which may live elsewhere, for testing), and nothing outside it.
     def translate_path(self, path):
         clean = urllib.parse.unquote(path.split('?')[0])
         if clean.startswith('/jam/'):
-            rest = os.path.normpath(clean[len('/jam/'):]).lstrip('/')
-            return os.path.join(JAM, '' if rest == '.' else rest)
+            full = os.path.realpath(os.path.join(JAM, clean[len('/jam/'):]))
+            return full if full == JAM or full.startswith(JAM + os.sep) else os.path.join(JAM, 'nowhere')
         return super().translate_path(path)
 
     # The newest solo, if it was written after `after` (seconds); 204 otherwise.
@@ -93,6 +103,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def do_POST(self):
         path, _, query = self.path.partition('?')
         body = self.rfile.read(int(self.headers.get('Content-Length', 0)))
+        if not self.local():
+            return self.reply(403)
         if path == '/jam/recording':
             return self.recording(query, body)
         if path != '/jam/loop':
@@ -100,6 +112,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         try:
             loop = json.loads(body)
         except ValueError:
+            return self.reply(400)
+        if not isinstance(loop, dict):
             return self.reply(400)
         os.makedirs(JAM, exist_ok=True)
         tmp = os.path.join(JAM, 'loop.json.tmp')
@@ -119,19 +133,22 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         name = re.sub(r'[^\w ,.()-]+', ' ', name.replace(':', ' -')).strip()[:80] or 'solo'
         folder = os.path.join(JAM, 'recordings')
         os.makedirs(folder, exist_ok=True)
-        with open(os.path.join(folder, f"{time.strftime('%Y-%m-%d %H%M')} {name}.webm"), 'wb') as f:
+        file = os.path.join(folder, f"{time.strftime('%Y-%m-%d %H%M%S')} {name}.webm")
+        with open(file, 'wb') as f:
             f.write(body)
-        prune(folder, RECORDINGS_MB * 1024 * 1024)
+        prune(folder, RECORDINGS_MB * 1024 * 1024, keep=file)
         self.reply(204)
 
     def log_message(self, *args):
         pass
 
 
-def prune(folder, limit):
-    """Delete the oldest recordings until the folder fits in `limit` bytes."""
+def prune(folder, limit, keep=None):
+    """Delete the oldest recordings until the folder fits in `limit` bytes (never `keep`)."""
     files = sorted((os.path.join(folder, n) for n in os.listdir(folder)), key=os.path.getmtime)
+    files = [f for f in files if f != keep]
     total = sum(os.path.getsize(f) for f in files)
+    total += os.path.getsize(keep) if keep else 0
     while files and total > limit:
         oldest = files.pop(0)
         total -= os.path.getsize(oldest)

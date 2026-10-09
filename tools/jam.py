@@ -102,7 +102,8 @@ def chart():
         cells = []
         for s in range(b, b + bar, beat):
             # A beat is named by what's sounding most of it (a re-strike can leave a gap at its top).
-            notes = max((at[i] for i in range(s, s + beat)), key=lambda x: sum(at[i] == x for i in range(s, s + beat)))
+            span = range(s, min(s + beat, b + bar, loop['steps']))  # 7/8 etc.: the last beat is short
+            notes = max((at[i] for i in span), key=lambda x: sum(at[i] == x for i in span))
             c = chord_name(notes)
             cells.append('.' if c == prev else c)
             prev = c
@@ -160,6 +161,8 @@ def play(files, video=False):
     """Hand one take, or several parts at once (a duet: they always start together)."""
     loop = load(os.path.join(JAM, 'loop.json'))
     parts = [check(f, loop) for f in files]
+    names = [p.get('part', 'lead') for p in parts]
+    assert len(set(names)) == len(names), f'each part needs its own "part" name (got {names})'
     for p in parts[1:]:
         p['record'] = False  # the first part's recording has them all in it
     parts[0]['video'] = video

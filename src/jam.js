@@ -30,6 +30,17 @@ const AMBER = '#e0af68';
 
 export const keyName = (n) => `${NOTE_NAMES[n % 12]}${Math.floor(n / 12) - 1}`;
 
+// Only the expression a note can actually use, as numbers: anything else (a typo, "full") would
+// throw inside the audio scheduling and stall the whole sequencer.
+function cleanExpression(e = {}) {
+  const out = {};
+  for (const k of ['from', 'bend', 'vib']) if (Number.isFinite(e[k])) out[k] = Math.max(-24, Math.min(24, e[k]));
+  if (out.vib != null) out.vib = Math.max(0, Math.min(1, out.vib));
+  if (e.release) out.release = true;
+  if (e.slide) out.slide = true;
+  return out;
+}
+
 // "F#4" -> 66 (middle C is C4).
 function noteNumber(name) {
   if (typeof name === 'number') return name;
@@ -128,7 +139,7 @@ export class Jam {
       const playing = this.seq.playing;
       this.stop(); // a solo belongs to the loop it was written for
       this.load(loop);
-      if (playing) this.looper.resume(); // takes over at the next bar
+      if (playing && this.looper.hasLoop) this.looper.resume(); // takes over at the next bar
       return bus.emit('hint', { text: `Loop from ${keyName(note)}${playing ? '' : ': pad 8 plays it'}`, color: AMBER });
     }
     if (!this.looper.layers.length) return bus.emit('hint', { text: `No loop on ${keyName(note)} yet` });
@@ -202,6 +213,14 @@ export class Jam {
   // ---------- receiving a solo ----------
 
   async poll() {
+    // Stopped or paused: playing solos end with the music, so their recordings don't run on in
+    // silence. One still waiting for its moment keeps waiting (minus any early recording).
+    if (!this.seq.playing) {
+      for (const s of [...this.solos.values()]) {
+        if (s.state === 'playing') this.stopParts(s.part);
+        else this.stopRecording(s, 0, true);
+      }
+    }
     if (this.polling) return;
     this.polling = true;
     try {
@@ -231,13 +250,13 @@ export class Jam {
     let prev = null;
     for (const [bar, beat, name, beats, ...rest] of data.notes) {
       const note = noteNumber(name);
-      const vel = rest.find((x) => typeof x === 'number') ?? 96;
-      const expr = { ...rest.find((x) => x && typeof x === 'object') };
+      const vel = Math.min(127, Math.max(1, rest.find((x) => Number.isFinite(x)) ?? 96));
+      const expr = cleanExpression(rest.find((x) => x && typeof x === 'object'));
       if (expr.slide && prev != null) expr.from = prev - note;
       prev = note;
       const at = (bar - 1) * barSteps + (beat - 1) * beatSteps;
       const len = beats * beatSteps;
-      if (!(at >= 0 && len > 0 && note > 20 && note < 109)) throw new Error(`odd note: ${JSON.stringify([bar, beat, name, beats])}`);
+      if (!(at >= 0 && len > 0 && note > 20 && note < 109 && Number.isFinite(at + len))) throw new Error(`odd note: ${JSON.stringify([bar, beat, name, beats])}`);
       const step = Math.floor(at);
       if (!byStep.has(step)) byStep.set(step, []);
       byStep.get(step).push({ at, note, vel, len, expr: Object.keys(expr).length ? expr : null });
@@ -248,11 +267,12 @@ export class Jam {
     // `fx` overrides the sound's own pedals and sends (drive, chorus, wobble, echo, reverb: 0..1).
     const fx = { ...preset.fx, ...data.fx };
     // A repeating solo goes round every `bars` bars (it can be longer than its last note).
-    const steps = data.bars ? data.bars * barSteps : Math.ceil(end / barSteps) * barSteps;
+    const bars = Math.max(1, Math.round(Number(data.bars) || 0));
+    const steps = data.bars ? Math.max(bars * barSteps, Math.ceil(end / barSteps) * barSteps) : Math.ceil(end / barSteps) * barSteps;
     // On screen each note's petals point round the circle by where it falls in a bar of the
     // solo's own time signature (`sweep`, in beats: 6 for a solo in 6/4), so a polymetric solo's
     // shapes drift against the rings.
-    const sweep = (data.sweep ?? barSteps / beatSteps) * beatSteps;
+    const sweep = (Number(data.sweep) > 0 ? Number(data.sweep) : barSteps / beatSteps) * beatSteps;
     return {
       title: data.title || 'Claude', part: data.part || 'lead', repeat: !!data.repeat,
       preset, fx, level: data.level ?? 1, byStep, steps, sweep,
@@ -284,7 +304,7 @@ export class Jam {
       if (s.state === 'cued') bus.emit('hint', null);
       this.solos.delete(s.part);
     }
-    if (!this.solos.size) this.origin = null;
+    if (!this.playing().length) this.origin = null;
   }
 
   stop() { this.stopParts(); }
@@ -293,7 +313,7 @@ export class Jam {
   finish(s) {
     this.stopRecording(s, 3000);
     this.solos.delete(s.part);
-    if (!this.solos.size) this.origin = null;
+    if (!this.playing().length) this.origin = null;
     setTimeout(() => this.engine.dropSound(s.sound), 3000);
   }
 
@@ -325,10 +345,11 @@ export class Jam {
     solo.recorder = rec;
   }
 
-  // Once the last notes and echoes have rung out.
-  stopRecording(solo, afterMs) {
+  // Once the last notes and echoes have rung out (`again`: it can start over when the solo does).
+  stopRecording(solo, afterMs, again = false) {
     const rec = solo.recorder;
     if (rec?.state === 'recording') setTimeout(() => rec.stop(), afterMs);
+    if (again) solo.recorder = null;
   }
 
   // The top of the loop (or of a bar, when it's just the drums).
@@ -352,6 +373,7 @@ export class Jam {
 
   playSolo(s, step, t) {
     if (s.state === 'cued') {
+      if (this.looper.hasLoop && !AUDIBLE.includes(this.looper.state)) return this.stopRecording(s, 0, true);
       if (this.startsAt(s, step + this.seq.sig.barSteps)) this.startRecording(s);
       if (!this.startsAt(s, step)) return;
       this.startRecording(s); // came in with less than a bar to go
