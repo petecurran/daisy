@@ -58,6 +58,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self.reply(200, html.encode(), 'text/html; charset=utf-8')
         if path == '/jam/solo':
             return self.solo(query)
+        if path == '/jam/loops':
+            folder = os.path.join(JAM, 'loops')
+            names = os.listdir(folder) if os.path.isdir(folder) else []
+            slots = sorted(int(n[:-5]) for n in names if re.fullmatch(r'\d+\.json', n))
+            return self.reply(200, json.dumps({'slots': slots}).encode())
         self.path = re.sub(r'^/v/[^/]+/', '/', self.path)
         super().do_GET()
 
@@ -100,6 +105,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         with open(tmp, 'w', encoding='utf-8') as f:
             json.dump(loop, f)
         os.replace(tmp, os.path.join(JAM, 'loop.json'))
+        # Every loop also lives on a key of its own (jam/loops/<MIDI note>.json).
+        if isinstance(loop.get('slot'), int):
+            os.makedirs(os.path.join(JAM, 'loops'), exist_ok=True)
+            with open(os.path.join(JAM, 'loops', f"{loop['slot']}.json"), 'w', encoding='utf-8') as f:
+                json.dump(loop, f)
         self.reply(204)
 
     # A recorded solo: jam/recordings/<date time> <title>.webm

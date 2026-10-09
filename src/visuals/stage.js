@@ -213,7 +213,7 @@ export class Stage {
     this.hud(now);
     this.deck.update({ sustain: this.src.sustain?.() });
     const live = this.bursts.findLast((b) => !b.loop && !b.ghost && b.held.size);
-    this.deck.lightKeys(live ? [...live.held] : [], live?.color ?? [0, 0, 0]);
+    this.deck.lightKeys(live ? [...live.held] : [], live?.color ?? [0, 0, 0], this.src.loopSlots?.());
 
     // Hotline Miami camera: sway and tilt with tape wobble, punch in on the kick.
     const sway = fx.wobble;

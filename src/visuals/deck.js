@@ -21,7 +21,7 @@ function padInfo(page, i, s) {
     }
     return { icon: drumsOn ? 'stop' : 'play', label: drumsOn ? 'Stop drums' : 'Drums', sub: 'hold: stop all', state: drumsOn ? 'green' : '' };
   }
-  if (i === 4) return { icon: 'sliders', label: page === 'drums' ? 'Drum knobs' : 'Sound knobs', sub: 'tap: flip' };
+  if (i === 4) return { icon: 'sliders', label: page === 'drums' ? 'Drum knobs' : 'Sound knobs', sub: 'tap: flip · hold: loops' };
   if (i === 7) {
     const st = looper?.state ?? 'empty';
     const [icon, label] = LOOP_PAD[st];
@@ -174,7 +174,11 @@ export class Deck {
 
   // Light the keys that are sounding, in the chord's colour. In notes mode the keys that belong to
   // the current key glow faintly (the home note a little more), so it's clear which ones fit.
-  lightKeys(notes, color) {
+  //
+  // While pad 5 is held (`slots`), the keys show the loop memory instead: amber where a loop is
+  // saved, white for the one playing now.
+  lightKeys(notes, color, slots) {
+    if (slots) return this.lightSlots(slots);
     const lit = new Set(notes.map((n) => ((n % 24) + 24) % 24));
     const { chords } = this.src;
     const guide = this.src.mode() === 'notes' && chords;
@@ -185,6 +189,18 @@ export class Deck {
       const on = lit.has(n) || (n === 24 && lit.has(0));
       this.set(`lit${n}`, el, '.lit', on);
       if (on) this.set(`c${n}`, el, '--c', `rgb(${color})`); // only touch the style when it changes
+    }
+  }
+
+  lightSlots({ slots, current }) {
+    const at = (n) => n - 48; // the strip shows C3..C5, the MPK's default octave
+    const saved = new Set(slots.map(at));
+    for (const [n, el] of this.keyEls) {
+      this.set(`in${n}`, el, '.inkey', false);
+      this.set(`home${n}`, el, '.home', false);
+      const on = saved.has(n);
+      this.set(`lit${n}`, el, '.lit', on);
+      if (on) this.set(`c${n}`, el, '--c', current != null && n === at(current) ? '#ffffff' : '#e0af68');
     }
   }
 }

@@ -24,7 +24,10 @@ const PAD_B = 32;
 // Pads change with the knob page, so they always fit what you're doing.
 // `down`/`up` fire instantly; `tap`/`hold` wait to see how long the pad is held.
 const DRUMS_PAD = { label: 'Play / Stop drums', sub: 'hold: stop everything', tap: () => toggleDrums(), hold: () => stopEverything() };
-const PAGE_PAD = { label: 'Knob page', tap: () => setKnobPage(knobPage === 'sound' ? 'drums' : 'sound') };
+const PAGE_PAD = {
+  label: 'Knob page', sub: 'hold + press key: loops',
+  tap: () => setKnobPage(knobPage === 'sound' ? 'drums' : 'sound'), hold: () => setLoopSelect(true), up: () => setLoopSelect(false),
+};
 const LOOP_PAD = { label: 'Looper', sub: 'tap · 2×tap stop · hold undo', down: () => looper.padDown(), up: () => looper.padUp() };
 const PAD_PAGES = {
   sound: [
@@ -521,6 +524,7 @@ function ensureEngine() {
       preset: () => PRESETS[presetIndex],
       mode: () => mode,
       sustain: () => sustain,
+      loopSlots: () => (loopSelect ? jam.slotView() : null),
     });
     stage.show(true); // the stage is the main view; V flips to the settings page (for debugging)
     engine.ctx.onstatechange = updateSplash;
@@ -588,15 +592,24 @@ function setSustain(on) {
   }
 }
 
+// Loop memory: hold pad 5 and press a key (see jam.js). The keys holding loops glow on the deck.
+let loopSelect = false;
+function setLoopSelect(on) {
+  loopSelect = on;
+  if (on) bus.emit('hint', { text: 'Loops: a glowing key brings its loop back, any other key saves this one there', color: '#e0af68', sticky: true });
+  else bus.emit('hint', null);
+}
+
 function keyDown(n, v) {
   if (!engine || engine.ctx.state !== 'running') return;
   if (keySelect) return setKey(n % 12);
+  if (loopSelect) return jam.pick(n);
   sustained.delete(n);
   if (mode === 'chords') chords.press(n, velocityCurve(v));
   else engine.noteOn(n, velocityCurve(v));
 }
 function keyUp(n) {
-  if (!engine || keySelect) return;
+  if (!engine || keySelect || loopSelect) return;
   if (sustain) return sustained.add(n);
   releaseKey(n);
 }

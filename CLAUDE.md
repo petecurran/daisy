@@ -24,6 +24,8 @@ WebGL, ES modules, **no build step and no dependencies**.
 - `src/bus.js` — tiny event bus between audio and visuals.
 - `src/jam.js` + `tools/jam.py` + `.claude/skills/solo` — Claude solos over the loop: daisy posts
   the loop to `jam/loop.json` via the server and plays `jam/solo.json` when it changes (`/solo`).
+  Solos are recorded to `jam/recordings/`. Loop memory: every loop is saved on a key
+  (`jam/loops/<note>.json`); hold pad 5 + a key recalls one (or saves a copy there).
 
 ## Working on it
 

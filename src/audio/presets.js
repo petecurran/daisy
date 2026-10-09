@@ -84,6 +84,26 @@ export const ALL_PRESETS = [
     fx: { drive: 0.08, chorus: 0.12, wobble: 0.0, echo: 0.0, reverb: 0.3 },
   },
   {
+    id: 'rhythm',
+    name: 'Rhythm Guitar',
+    inspired: 'Early-90s Seattle: a Les Paul into an amp on the edge of breakup',
+    blurb: 'Big open chords that ring and chime, just starting to break up. Strum hard, let them ring.',
+    color: '#d9a05b',
+    oscs: [
+      { type: 'sawtooth', octave: 0, detune: -4, level: 0.45 },
+      { type: 'square', octave: 0, detune: 5, level: 0.25 },
+      { type: 'sawtooth', octave: 1, detune: 2, level: 0.12 },
+    ],
+    noise: 0.003,
+    // Brighter and less driven than Crunch, so every note of a chord stays clear; the octave-up saw
+    // is the chime of the high strings.
+    filter: { cutoff: 2300, q: 1.0, env: 2000, keytrack: 0.5 },
+    fenv: { a: 0.002, d: 0.5, s: 0.4, r: 0.3 },
+    aenv: { a: 0.002, d: 3, s: 0.5, r: 0.35 },
+    pitchEnv: { cents: 8, time: 0.03 },
+    fx: { drive: 0.38, chorus: 0.25, wobble: 0.0, echo: 0.12, reverb: 0.35 },
+  },
+  {
     id: 'crunch',
     name: 'Crunch Guitar',
     inspired: 'Les Paul into a cranked Marshall',
