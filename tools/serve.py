@@ -23,6 +23,7 @@ import time
 import urllib.parse
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+RECORDINGS_MB = 300  # past this, the oldest recordings make way
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 5173
 JAM = os.path.abspath(sys.argv[2]) if len(sys.argv) > 2 else os.path.join(ROOT, 'jam')
 
@@ -120,10 +121,21 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         os.makedirs(folder, exist_ok=True)
         with open(os.path.join(folder, f"{time.strftime('%Y-%m-%d %H%M')} {name}.webm"), 'wb') as f:
             f.write(body)
+        prune(folder, RECORDINGS_MB * 1024 * 1024)
         self.reply(204)
 
     def log_message(self, *args):
         pass
+
+
+def prune(folder, limit):
+    """Delete the oldest recordings until the folder fits in `limit` bytes."""
+    files = sorted((os.path.join(folder, n) for n in os.listdir(folder)), key=os.path.getmtime)
+    total = sum(os.path.getsize(f) for f in files)
+    while files and total > limit:
+        oldest = files.pop(0)
+        total -= os.path.getsize(oldest)
+        os.remove(oldest)
 
 
 handler = functools.partial(Handler, directory=ROOT)

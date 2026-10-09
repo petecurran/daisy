@@ -166,15 +166,16 @@ void main() {
   float petals = 0.0;
   for (int i = 0; i < MAXD; i++) {
     if (i >= dropCount) break;
-    float x = (r - drops[i].x) / (90.0 * dpr);
+    float x = (r - drops[i].x) / (130.0 * dpr);
     float w = exp(-x * x);
     if (w < 0.01) continue;
     float l = cos(drops[i].z * (ang - drops[i].y));
     l = mix(l, sign(l) * sqrt(abs(l)), dropInfo[i].w); // driven: fat, square petals
     petals += drops[i].w * w * l;
-    tint += dropInfo[i].rgb * w * drops[i].w / (30.0 * dpr) * 0.22;
+    tint += dropInfo[i].rgb * w * drops[i].w / (55.0 * dpr) * 0.4;
   }
-  r -= petals;
+  r -= 80.0 * dpr * tanh(petals / (80.0 * dpr)); // a pile of shred notes folds, but never tears
+  tint /= 1.0 + 2.0 * max(tint.r, max(tint.g, tint.b)); // many notes at once: colour, not a white-out
   vec4 a = vec4(sin(ang * 6.0), cos(ang * 6.0), sin(ang * 13.0), cos(ang * 13.0));
   vec3 c = split > 0.5 ? chorus(r, ang, a) : shade(r, ang, a);
   c += tint;

@@ -2,8 +2,10 @@
 """The chat side of jamming with daisy (see .claude/skills/solo).
 
     python3 tools/jam.py              the shared loop as a chord chart
-    python3 tools/jam.py play FILE    check a solo and hand it to daisy (it comes in at the top of
-                                      the next time round the loop)
+    python3 tools/jam.py play FILE... [--video]
+                                      check a solo (or several parts, played together) and hand it
+                                      to daisy: it comes in at the top of the next time round the
+                                      loop. --video films the stage too (for showing it off)
     python3 tools/jam.py stop [PART]  stop the solos playing (or just one part)
 
 daisy keeps jam/loop.json up to date with the last loop made; it picks up jam/solo.json within a
@@ -116,9 +118,9 @@ def chart():
         print(f'  {pos:<7} step {s:<3} {chord_name(notes):<10} {" ".join(name(n) for n in sorted(notes))}')
 
 
-def play(file):
+def check(file, loop):
+    """Read a take, check its notes and say what it is."""
     solo = load(file)
-    loop = load(os.path.join(JAM, 'loop.json'))
     bar, beat = loop['barSteps'], loop['beatSteps']
     key_root, key_mode = loop['key'].split()
     scale = {(PITCH[key_root[0]] + {'#': 1, 'b': -1}.get(key_root[1:2], 0) + i) % 12 for i in SCALES[key_mode]}
@@ -139,26 +141,38 @@ def play(file):
           f"({bars / loop['bars']:g}x round the {loop['bars']:g}-bar loop), {name(min(notes))}-{name(max(notes))}.")
     if outside:
         print(f'Outside {loop["key"]} (fine if meant): ' + ', '.join(outside))
-    os.makedirs(JAM, exist_ok=True)
-    tmp = os.path.join(JAM, 'solo.json.tmp')
-    with open(tmp, 'w', encoding='utf-8') as f:
-        json.dump(solo, f)
-    os.replace(tmp, os.path.join(JAM, 'solo.json'))  # daisy never sees a half-written file
     # Keep the loop it was first played over next to the take, so the pair can be heard again.
     paired = re.sub(r'\.json$', '', file) + '.loop.json'
     if not os.path.exists(paired):
         shutil.copyfile(os.path.join(JAM, 'loop.json'), paired)
-    print('Handed to daisy: it comes in at the top of the loop.')
+    return solo
+
+
+def hand_over(data):
+    os.makedirs(JAM, exist_ok=True)
+    tmp = os.path.join(JAM, 'solo.json.tmp')
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(data, f)
+    os.replace(tmp, os.path.join(JAM, 'solo.json'))  # daisy never sees a half-written file
+
+
+def play(files, video=False):
+    """Hand one take, or several parts at once (a duet: they always start together)."""
+    loop = load(os.path.join(JAM, 'loop.json'))
+    parts = [check(f, loop) for f in files]
+    for p in parts[1:]:
+        p['record'] = False  # the first part's recording has them all in it
+    parts[0]['video'] = video
+    hand_over(parts[0] if len(parts) == 1 else {'parts': parts})
+    print('Handed to daisy: it comes in at the top of the loop' + (', filmed.' if video else '.'))
 
 
 if __name__ == '__main__':
-    if len(sys.argv) > 2 and sys.argv[1] == 'play':
-        play(sys.argv[2])
-    elif len(sys.argv) > 1 and sys.argv[1] == 'stop':
-        os.makedirs(JAM, exist_ok=True)
-        with open(os.path.join(JAM, 'solo.json.tmp'), 'w', encoding='utf-8') as f:
-            json.dump({'stop': sys.argv[2] if len(sys.argv) > 2 else True}, f)
-        os.replace(os.path.join(JAM, 'solo.json.tmp'), os.path.join(JAM, 'solo.json'))
+    args = sys.argv[1:]
+    if args[:1] == ['play'] and len(args) > 1:
+        play([a for a in args[1:] if a != '--video'], video='--video' in args)
+    elif args[:1] == ['stop']:
+        hand_over({'stop': args[1] if len(args) > 1 else True})
         print('Stopped.')
     else:
         chart()

@@ -512,7 +512,7 @@ function ensureEngine() {
     clock.setOutput(midiOut);
     seq.onStart = (t) => clock.align(t); // arp locks to the drum grid
     looper = new Looper(engine, seq, { onState: renderLooper });
-    jam = new Jam(engine, seq, looper, { key: () => chords.key, setKey });
+    jam = new Jam(engine, seq, looper, { key: () => chords.key, setKey, stage: () => stage });
     seq.onSchedule = (step, t) => {
       looper.onSchedule(step, t);
       jam.onSchedule(step, t);

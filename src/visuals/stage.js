@@ -9,7 +9,6 @@ import { SHIMMER, analyzeChord, chordColor } from './chordColor.js';
 import { ChordLabel } from './chordLabel.js';
 
 const CHORD_GAP_MS = 70; // notes closer together than this belong to the same chord
-const hexRgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
 // Petals per interval above the chord's root, after the harmonic series (a fifth is 3:2, a fourth
 // 4:3, a major third 5:4...): the sweeter the interval, the fewer and broader the petals.
 const PETALS = [2, 10, 8, 6, 5, 4, 9, 3, 7, 5, 7, 9];
@@ -37,7 +36,6 @@ export class Stage {
     this.look = 0;
     this.bursts = [];
     this.pulses = []; // Claude's solo notes, bending the rings as they travel out
-    this.bikes = new Map(); // solo part -> its light bike
     this.pulse = 0;
     this.shimmer = 0;
     this.flash = 0;
@@ -142,104 +140,34 @@ export class Stage {
 
   // A solo note fires a pulse out from the centre that bends the rings into petals as it passes
   // (see rings.js). The interval it makes with the loop's chord picks the petals: sweet intervals
-  // make a few broad ones, clashing ones many fine ones. They point at the light bike that
-  // played it, and the pulse glows faintly in the note's own colour.
-  onSolo({ part, note, vel, dur, expr, frac, sweepSec, color, square }) {
+  // make a few broad ones, clashing ones many fine ones. Where the note falls in the solo's own
+  // bar turns them round the circle, and the pulse glows in the note's own colour.
+  onSolo({ note, vel, dur, expr, frac, square }) {
     const now = performance.now() / 1000;
     const root = this.bursts.findLast((b) => b.loop && b.chord)?.chord.root ?? this.src.chords?.key.tonic ?? 0;
     const petals = PETALS[(note - root + 120) % 12];
     const angle = Math.PI * (1 - frac);
     this.pulses.push({ born: now, angle, petals, note, vel, dur, expr, color: pitchColor(note), square });
     if (this.pulses.length > 60) this.pulses.shift();
-    const bike = this.bikes.get(part) ?? { trail: [], ring: null };
-    Object.assign(bike, { frac, at: now, sweepSec, color: hexRgb(color), last: now });
-    this.bikes.set(part, bike);
   }
 
-  // Where a ring's leading edge is now (as in ringList).
-  ringEdge(ring, now) {
-    return (now - ring.born) * (this.ringSpeed ?? 100) + 14 * this.dpr;
-  }
-
-  get rideRadius() { return (this.maxR ?? 800) * 0.3; }
-
-  // The ring whose band covers radius r: the newest one whose edge is already past it.
-  ringAt(r, now) {
-    for (let i = this.bursts.length - 1; i >= 0; i--) {
-      const b = this.bursts[i];
-      if (!b.ghost && b.color && this.ringEdge(b, now) > r) return b;
-    }
-    return null;
-  }
-
-  // Each pulse travels out with the rings. Its petals are deepest for loud, held notes; vibrato
-  // sways them; they soften as they go.
+  // Each pulse travels out with the rings. Its petals are deepest for loud, held notes; they turn
+  // slowly as they go (odd petal counts one way, even the other, so overlapping flowers swirl
+  // through each other); vibrato sways them; they soften only slowly.
   pulseList(now) {
     const speed = this.ringSpeed ?? 100, d = this.dpr;
     this.pulses = this.pulses.filter((p) => (now - p.born) * speed < (this.maxR ?? 2000) * 1.3);
     return this.pulses.slice(-24).map((p) => {
       const age = now - p.born;
       const vib = p.expr?.vib ? Math.sin(age * 34) * 0.05 * p.expr.vib : 0;
+      const spin = (p.petals % 2 ? 0.14 : -0.14) * age;
       const hold = Math.min(1, Math.sqrt(p.dur / 0.3));
       return {
-        radius: age * speed + 14 * d, angle: p.angle + vib, petals: p.petals,
-        depth: (p.vel / 127) * 26 * d * hold / Math.sqrt(p.petals / 2) * Math.exp(-age / 10),
+        radius: age * speed + 14 * d, angle: p.angle + spin + vib, petals: p.petals,
+        depth: (p.vel / 127) * 55 * d * hold / Math.sqrt(p.petals / 2) * Math.exp(-age / 16),
         color: p.color, square: p.square,
       };
     });
-  }
-
-  // How far the pulses have bent the rings at (r, angle), as the shader does it.
-  bendAt(r, ang, pulses) {
-    let s = 0;
-    for (const p of pulses) {
-      const x = (r - p.radius) / (90 * this.dpr);
-      s += p.depth * Math.exp(-x * x) * Math.cos(p.petals * (ang - p.angle));
-    }
-    return s;
-  }
-
-  // Light bikes: each solo part rides a ring edge (bent with the petals) round the circle, once a
-  // bar of the solo's own time, leaving a hard neon trail. When its ring has carried it too far
-  // out it cuts straight back in to the ring passing a third of the way out.
-  drawBikes(g, now, pulses, zoom) {
-    const d = this.dpr, ox = this.originCss[0] * d, oy = this.originCss[1] * d, R0 = this.rideRadius;
-    for (const [part, bike] of this.bikes) {
-      if (now - bike.last > 2.5) {
-        bike.trail = bike.trail.filter((p) => now - p.t < 1.4);
-        if (!bike.trail.length) this.bikes.delete(part);
-      } else {
-        if (!bike.ring || this.ringEdge(bike.ring, now) > R0 * 1.5) bike.ring = this.ringAt(R0, now);
-        const frac = (bike.frac + (now - bike.at) / bike.sweepSec) % 1;
-        const ang = Math.PI * (1 - frac);
-        const edge = bike.ring ? this.ringEdge(bike.ring, now) : R0;
-        const r = edge + this.bendAt(edge, ang, pulses) - 5 * d;
-        const prev = bike.trail[bike.trail.length - 1];
-        // Coming back round to the start: a new trail, not a line across the screen.
-        bike.trail.push({ x: ox + Math.cos(ang) * r * zoom, y: oy - Math.sin(ang) * r * zoom, t: now, gap: prev && frac < prev.frac, frac });
-        bike.trail = bike.trail.filter((p) => now - p.t < 1.4);
-      }
-      const [cr, cg, cb] = bike.color;
-      g.lineCap = 'square';
-      for (let i = 1; i < bike.trail.length; i++) {
-        const a = bike.trail[i - 1], b = bike.trail[i];
-        if (b.gap) continue;
-        const fade = 1 - (now - b.t) / 1.4;
-        g.strokeStyle = `rgba(${cr},${cg},${cb},${0.85 * fade})`;
-        g.lineWidth = 4 * d;
-        g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke();
-        g.strokeStyle = `rgba(255,255,255,${0.9 * fade})`;
-        g.lineWidth = 1.2 * d;
-        g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke();
-      }
-      const head = bike.trail[bike.trail.length - 1];
-      if (head && now - bike.last <= 2.5) {
-        g.fillStyle = `rgb(${cr},${cg},${cb})`;
-        g.fillRect(head.x - 5 * d, head.y - 5 * d, 10 * d, 10 * d);
-        g.fillStyle = '#ffffff';
-        g.fillRect(head.x - 2.5 * d, head.y - 2.5 * d, 5 * d, 5 * d);
-      }
-    }
   }
 
   onDrum({ sound, vel }) {
@@ -274,6 +202,24 @@ export class Stage {
       notes: [], held: new Set(), born: now, releasedAt: now, vel, loop: false, ghost: 0, drum: true,
       seed: Math.random() * 100, color: last?.color ?? [90, 110, 220], chord: last?.chord ?? null,
     });
+  }
+
+  // ---------- filming ----------
+
+  // A video of the stage (visuals and text layer), for recording a solo: each frame is copied to
+  // a smaller canvas straight after it's drawn.
+  startCapture(fps = 30) {
+    const scale = Math.min(1, 1280 / this.W);
+    const c = document.createElement('canvas');
+    c.width = Math.round(this.W * scale);
+    c.height = Math.round(this.H * scale);
+    const g = c.getContext('2d');
+    this.capture = () => {
+      g.drawImage(this.glCanvas, 0, 0, c.width, c.height);
+      g.drawImage(this.hudCanvas, 0, 0, c.width, c.height);
+    };
+    const stream = c.captureStream(fps);
+    return { stream, stop: () => { this.capture = null; stream.getTracks().forEach((t) => t.stop()); } };
   }
 
   // ---------- frame ----------
@@ -318,10 +264,10 @@ export class Stage {
 
     const look = this.looks[this.look];
     const rings = this.ringList(now, fx);
-    this.pulseNow = this.pulseList(now);
-    look?.render(dt, now, fx, rings, [this.originCss[0] * this.dpr, this.H - this.originCss[1] * this.dpr], this.pulseNow);
+    look?.render(dt, now, fx, rings, [this.originCss[0] * this.dpr, this.H - this.originCss[1] * this.dpr], this.pulseList(now));
 
     this.hud(now, fx);
+    this.capture?.(); // filming a solo: copy the frame while it's still there
     this.deck.update({ sustain: this.src.sustain?.() });
     const live = this.bursts.findLast((b) => !b.loop && !b.ghost && b.held.size);
     this.deck.lightKeys(live ? [...live.held] : [], live?.color ?? [0, 0, 0], this.src.loopSlots?.());
@@ -365,7 +311,6 @@ export class Stage {
   hud(now, fx) {
     const g = this.h, d = this.dpr, W = this.W, H = this.H;
     g.clearRect(0, 0, W, H);
-    this.drawBikes(g, now, this.pulseNow ?? [], 1 - fx.reverb * 0.45); // under the text
     const { seq, looper, chords, engine } = this.src;
     const tnow = performance.now();
     const pad = 26 * d;

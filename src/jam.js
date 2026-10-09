@@ -40,8 +40,9 @@ function noteNumber(name) {
 }
 
 export class Jam {
-  constructor(engine, seq, looper, { key, setKey }) {
+  constructor(engine, seq, looper, { key, setKey, stage }) {
     this.engine = engine;
+    this.stage = stage;
     this.seq = seq;
     this.looper = looper;
     this.key = key;
@@ -210,7 +211,8 @@ export class Jam {
         try {
           const data = await res.json();
           if (data.stop) this.stopParts(data.stop === true ? null : data.stop);
-          else this.cue(this.parse(data));
+          // Several parts in one hand-off (a duet) are cued together, so they always start together.
+          else for (const part of data.parts ?? [data]) this.cue(this.parse(part));
         } catch (e) {
           console.warn('Claude\'s solo didn\'t make sense:', e);
           bus.emit('hint', { text: 'Claude\'s solo didn\'t load' });
@@ -247,12 +249,14 @@ export class Jam {
     const fx = { ...preset.fx, ...data.fx };
     // A repeating solo goes round every `bars` bars (it can be longer than its last note).
     const steps = data.bars ? data.bars * barSteps : Math.ceil(end / barSteps) * barSteps;
-    // On screen the solo sweeps round the rings once per bar of its own time signature (`sweep`,
-    // in beats: 6 for a solo in 6/4), so a polymetric solo drifts against the rings.
+    // On screen each note's petals point round the circle by where it falls in a bar of the
+    // solo's own time signature (`sweep`, in beats: 6 for a solo in 6/4), so a polymetric solo's
+    // shapes drift against the rings.
     const sweep = (data.sweep ?? barSteps / beatSteps) * beatSteps;
     return {
       title: data.title || 'Claude', part: data.part || 'lead', repeat: !!data.repeat,
       preset, fx, level: data.level ?? 1, byStep, steps, sweep,
+      record: data.record !== false, video: !!data.video,
     };
   }
 
@@ -295,21 +299,29 @@ export class Jam {
 
   // ---------- recording ----------
 
-  // Everything you hear (after the master compressor), from a bar before the solo comes in.
+  // Everything you hear (after the master compressor), from a bar before the solo comes in. Audio
+  // is kept small (64 kbps Opus, about half a megabyte a minute); a solo marked `video` also films
+  // the stage, for showing it off.
   startRecording(solo) {
-    if (solo.recorder || !window.MediaRecorder) return;
+    if (solo.recorder || !solo.record || !window.MediaRecorder) return;
     this.tap ??= this.engine.ctx.createMediaStreamDestination();
     if (!this.recorders++) this.engine.fx.comp.connect(this.tap); // two can overlap while one rings out
-    const rec = new MediaRecorder(this.tap.stream, { mimeType: 'audio/webm;codecs=opus', audioBitsPerSecond: 192000 });
+    const stage = this.stage?.();
+    const film = solo.video && stage?.visible ? stage.startCapture() : null; // only while it's drawing
+    const stream = new MediaStream([...this.tap.stream.getAudioTracks(), ...(film?.stream.getVideoTracks() ?? [])]);
+    const rec = new MediaRecorder(stream, film
+      ? { mimeType: 'video/webm;codecs=vp9,opus', videoBitsPerSecond: 6e6, audioBitsPerSecond: 128000 }
+      : { mimeType: 'audio/webm;codecs=opus', audioBitsPerSecond: 64000 });
     const chunks = [];
     rec.ondataavailable = (e) => chunks.push(e.data);
     rec.onstop = () => {
       if (!--this.recorders) this.engine.fx.comp.disconnect(this.tap);
+      film?.stop();
       if (solo.state !== 'playing') return; // never got going
       fetch(`/jam/recording?name=${encodeURIComponent(solo.title)}`, { method: 'POST', body: new Blob(chunks, { type: 'audio/webm' }) })
         .catch((e) => console.warn('Couldn\'t save the recording:', e));
     };
-    rec.start();
+    rec.start(1000); // in pieces, so a long take never sits in one huge buffer
     solo.recorder = rec;
   }
 
@@ -361,8 +373,8 @@ export class Jam {
       const at = t + (n.at - rel) * stepDur, dur = Math.max(0.03, n.len * stepDur - 0.01);
       this.engine.playNote(n.note, n.vel, s.sound, at, dur, n.expr, false);
       bus.emitAt(this.engine.ctx, at, 'solo', {
-        part: s.part, note: n.note, vel: n.vel, dur, expr: n.expr, color: s.preset.color,
-        frac: (n.at % s.sweep) / s.sweep, sweepSec: s.sweep * stepDur, square: Math.max(0, (s.fx.drive ?? 0) - 0.3) / 0.7,
+        note: n.note, vel: n.vel, dur, expr: n.expr,
+        frac: (n.at % s.sweep) / s.sweep, square: Math.max(0, (s.fx.drive ?? 0) - 0.3) / 0.7,
       });
     }
   }
