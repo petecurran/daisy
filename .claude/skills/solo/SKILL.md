@@ -47,6 +47,9 @@ Write it to `jam/takes/<NN>-<short-name>.json` (count up from the takes already 
 - Expression (semitones): `from` scoops in from below/above; `slide: true` glides from the
   previous note; `bend` bends up partway through (`release: true` lets it back down before the
   end); `vib` 0-1 is vibrato that blooms on long notes. These make it sound played, not typed.
+- `fx` (optional) sets the sound's pedals for this solo, each 0-1: `{"drive": 1, "echo": 0.1}`
+  (also `chorus`, `wobble`, `reverb`). Drive at 1 is as filthy as daisy goes. A page loaded before
+  2026-10-09 20:50 ignores `fx` until it's reloaded.
 - The solo can last several times round the loop (e.g. 8 bars over a 4-bar loop). It plays once,
   then stops.
 - `sound` is optional: `lead` (Singing Lead, the default) or any daisy preset id (`velvet`,

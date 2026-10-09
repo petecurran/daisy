@@ -116,13 +116,15 @@ export class Jam {
     }
     if (!byStep.size) throw new Error('no notes');
     const preset = ALL_PRESETS.find((p) => p.id === data.sound) ?? ALL_PRESETS.find((p) => p.id === 'lead');
-    return { title: data.title || 'Claude', preset, level: data.level ?? 1, byStep, steps: Math.ceil(end / barSteps) * barSteps };
+    // `fx` overrides the sound's own pedals and sends (drive, chorus, wobble, echo, reverb: 0..1).
+    const fx = { ...preset.fx, ...data.fx };
+    return { title: data.title || 'Claude', preset, fx, level: data.level ?? 1, byStep, steps: Math.ceil(end / barSteps) * barSteps };
   }
 
   // A new solo replaces any that's playing, and waits for the top of the loop.
   cue(solo) {
     this.stop();
-    const sound = new Sound(this.engine, solo.preset, { level: solo.level });
+    const sound = new Sound(this.engine, solo.preset, { values: solo.fx, level: solo.level });
     this.solo = { ...solo, sound, state: 'cued' };
     bus.emit('hint', { text: 'Claude has a solo: in at the top of the loop', color: solo.preset.color, sticky: true });
   }
