@@ -4,12 +4,15 @@ import { createGL } from './gl.js';
 import { Rings } from './rings.js';
 import { Deck } from './deck.js';
 import { ICON, KNOB_ICONS, KNOB_LABELS } from './icons.js';
-import { KNOB_COLORS } from './palette.js';
+import { KNOB_COLORS, pitchColor } from './palette.js';
 import { SHIMMER, analyzeChord, chordColor } from './chordColor.js';
 import { ChordLabel } from './chordLabel.js';
 
 const CHORD_GAP_MS = 70; // notes closer together than this belong to the same chord
 const hexRgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+// Petals per interval above the chord's root, after the harmonic series (a fifth is 3:2, a fourth
+// 4:3, a major third 5:4...): the sweeter the interval, the fewer and broader the petals.
+const PETALS = [2, 10, 8, 6, 5, 4, 9, 3, 7, 5, 7, 9];
 const ICON_PATHS = Object.fromEntries(Object.entries(ICON).map(([k, d]) => [k, new Path2D(d)]));
 
 // Full-screen stage: the Tree Rings (GPU) underneath, a crisp text layer on top, and
@@ -33,8 +36,8 @@ export class Stage {
     }
     this.look = 0;
     this.bursts = [];
-    this.drops = []; // Claude's solo notes, rippling on the rings
-    this.riders = new Map(); // solo part -> where its sweep round the rings is
+    this.pulses = []; // Claude's solo notes, bending the rings as they travel out
+    this.bikes = new Map(); // solo part -> its light bike
     this.pulse = 0;
     this.shimmer = 0;
     this.flash = 0;
@@ -137,22 +140,25 @@ export class Stage {
     }
   }
 
-  // A solo note lands a third of the way out, on whichever ring is passing there, round the circle
-  // by where it falls in the solo's own bar (left to right, once a bar). Then it rides out with
-  // that ring. Higher notes sit further out in the band.
+  // A solo note fires a pulse out from the centre that bends the rings into petals as it passes
+  // (see rings.js). The interval it makes with the loop's chord picks the petals: sweet intervals
+  // make a few broad ones, clashing ones many fine ones. They point at the light bike that
+  // played it, and the pulse glows faintly in the note's own colour.
   onSolo({ part, note, vel, dur, expr, frac, sweepSec, color, square }) {
     const now = performance.now() / 1000;
-    const ring = this.ringAt(this.rideRadius, now);
-    const rgb = hexRgb(color);
-    const behind = this.ringEdge(ring, now, now) - this.rideRadius; // how far inside its ring's edge
-    this.drops.push({ ring, born: now, behind, angle: Math.PI * (1 - frac), note, vel, dur, expr, color: rgb, square });
-    if (this.drops.length > 60) this.drops.shift();
-    this.riders.set(part, { frac, at: now, sweepSec, color: rgb, square, note });
+    const root = this.bursts.findLast((b) => b.loop && b.chord)?.chord.root ?? this.src.chords?.key.tonic ?? 0;
+    const petals = PETALS[(note - root + 120) % 12];
+    const angle = Math.PI * (1 - frac);
+    this.pulses.push({ born: now, angle, petals, note, vel, dur, expr, color: pitchColor(note), square });
+    if (this.pulses.length > 60) this.pulses.shift();
+    const bike = this.bikes.get(part) ?? { trail: [], ring: null };
+    Object.assign(bike, { frac, at: now, sweepSec, color: hexRgb(color), last: now });
+    this.bikes.set(part, bike);
   }
 
-  // Where a ring's leading edge is now (as in ringList), or a ring born at `born` if there's none.
-  ringEdge(ring, born, now) {
-    return (now - (ring?.born ?? born)) * (this.ringSpeed ?? 100) + 14 * this.dpr;
+  // Where a ring's leading edge is now (as in ringList).
+  ringEdge(ring, now) {
+    return (now - ring.born) * (this.ringSpeed ?? 100) + 14 * this.dpr;
   }
 
   get rideRadius() { return (this.maxR ?? 800) * 0.3; }
@@ -161,36 +167,79 @@ export class Stage {
   ringAt(r, now) {
     for (let i = this.bursts.length - 1; i >= 0; i--) {
       const b = this.bursts[i];
-      if (!b.ghost && b.color && this.ringEdge(b, now, now) > r) return b;
+      if (!b.ghost && b.color && this.ringEdge(b, now) > r) return b;
     }
     return null;
   }
 
-  // Each note's ripple centre: on its ring, deeper in the band for lower notes. Bends drift it
-  // across the band, vibrato wobbles it round; it rings while the note lasts, then dies away.
-  dropList(now) {
-    const out = [];
-    const lane = (p) => (Math.min(1, Math.max(0, (p - 40) / 50)) - 0.5) * 70 * this.dpr; // higher = further out
-    this.drops = this.drops.filter((d) => now - d.born < d.dur + 7);
-    for (const d of this.drops) {
-      const age = now - d.born;
-      const e = d.expr ?? {};
-      let pitch = d.note;
-      if (e.bend) pitch += e.bend * Math.min(1, Math.max(0, (age - Math.min(0.22, d.dur * 0.3)) / 0.16));
-      const r = Math.max(0, this.ringEdge(d.ring, d.born, now) - d.behind + lane(pitch));
-      const ang = d.angle + (e.vib ? Math.sin(age * 34) * 0.012 * e.vib : 0);
-      // Strong while the note sounds, then a long settle as it rides out to the edge.
-      const fade = age < d.dur ? Math.min(1, age / 0.03) : 0.35 * Math.exp(-(age - d.dur) / 2.5);
-      out.push({ x: Math.cos(ang) * r, y: Math.sin(ang) * r, amp: (d.vel / 127) * fade, age, color: d.color, square: d.square });
+  // Each pulse travels out with the rings. Its petals are deepest for loud, held notes; vibrato
+  // sways them; they soften as they go.
+  pulseList(now) {
+    const speed = this.ringSpeed ?? 100, d = this.dpr;
+    this.pulses = this.pulses.filter((p) => (now - p.born) * speed < (this.maxR ?? 2000) * 1.3);
+    return this.pulses.slice(-24).map((p) => {
+      const age = now - p.born;
+      const vib = p.expr?.vib ? Math.sin(age * 34) * 0.05 * p.expr.vib : 0;
+      const hold = Math.min(1, Math.sqrt(p.dur / 0.3));
+      return {
+        radius: age * speed + 14 * d, angle: p.angle + vib, petals: p.petals,
+        depth: (p.vel / 127) * 26 * d * hold / Math.sqrt(p.petals / 2) * Math.exp(-age / 10),
+        color: p.color, square: p.square,
+      };
+    });
+  }
+
+  // How far the pulses have bent the rings at (r, angle), as the shader does it.
+  bendAt(r, ang, pulses) {
+    let s = 0;
+    for (const p of pulses) {
+      const x = (r - p.radius) / (90 * this.dpr);
+      s += p.depth * Math.exp(-x * x) * Math.cos(p.petals * (ang - p.angle));
     }
-    // The riders themselves: a faint stir where each part's sweep is now.
-    for (const [part, rd] of this.riders) {
-      if (now - rd.at > 2) { this.riders.delete(part); continue; }
-      const frac = (rd.frac + (now - rd.at) / rd.sweepSec) % 1;
-      const ang = Math.PI * (1 - frac), r = this.rideRadius + lane(rd.note);
-      out.push({ x: Math.cos(ang) * r, y: Math.sin(ang) * r, amp: 0.3, age: (now * 0.9) % 1.4, color: rd.color, square: rd.square });
+    return s;
+  }
+
+  // Light bikes: each solo part rides a ring edge (bent with the petals) round the circle, once a
+  // bar of the solo's own time, leaving a hard neon trail. When its ring has carried it too far
+  // out it cuts straight back in to the ring passing a third of the way out.
+  drawBikes(g, now, pulses, zoom) {
+    const d = this.dpr, ox = this.originCss[0] * d, oy = this.originCss[1] * d, R0 = this.rideRadius;
+    for (const [part, bike] of this.bikes) {
+      if (now - bike.last > 2.5) {
+        bike.trail = bike.trail.filter((p) => now - p.t < 1.4);
+        if (!bike.trail.length) this.bikes.delete(part);
+      } else {
+        if (!bike.ring || this.ringEdge(bike.ring, now) > R0 * 1.5) bike.ring = this.ringAt(R0, now);
+        const frac = (bike.frac + (now - bike.at) / bike.sweepSec) % 1;
+        const ang = Math.PI * (1 - frac);
+        const edge = bike.ring ? this.ringEdge(bike.ring, now) : R0;
+        const r = edge + this.bendAt(edge, ang, pulses) - 5 * d;
+        const prev = bike.trail[bike.trail.length - 1];
+        // Coming back round to the start: a new trail, not a line across the screen.
+        bike.trail.push({ x: ox + Math.cos(ang) * r * zoom, y: oy - Math.sin(ang) * r * zoom, t: now, gap: prev && frac < prev.frac, frac });
+        bike.trail = bike.trail.filter((p) => now - p.t < 1.4);
+      }
+      const [cr, cg, cb] = bike.color;
+      g.lineCap = 'square';
+      for (let i = 1; i < bike.trail.length; i++) {
+        const a = bike.trail[i - 1], b = bike.trail[i];
+        if (b.gap) continue;
+        const fade = 1 - (now - b.t) / 1.4;
+        g.strokeStyle = `rgba(${cr},${cg},${cb},${0.85 * fade})`;
+        g.lineWidth = 4 * d;
+        g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke();
+        g.strokeStyle = `rgba(255,255,255,${0.9 * fade})`;
+        g.lineWidth = 1.2 * d;
+        g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke();
+      }
+      const head = bike.trail[bike.trail.length - 1];
+      if (head && now - bike.last <= 2.5) {
+        g.fillStyle = `rgb(${cr},${cg},${cb})`;
+        g.fillRect(head.x - 5 * d, head.y - 5 * d, 10 * d, 10 * d);
+        g.fillStyle = '#ffffff';
+        g.fillRect(head.x - 2.5 * d, head.y - 2.5 * d, 5 * d, 5 * d);
+      }
     }
-    return out.slice(-24);
   }
 
   onDrum({ sound, vel }) {
@@ -269,9 +318,10 @@ export class Stage {
 
     const look = this.looks[this.look];
     const rings = this.ringList(now, fx);
-    look?.render(dt, now, fx, rings, [this.originCss[0] * this.dpr, this.H - this.originCss[1] * this.dpr], this.dropList(now));
+    this.pulseNow = this.pulseList(now);
+    look?.render(dt, now, fx, rings, [this.originCss[0] * this.dpr, this.H - this.originCss[1] * this.dpr], this.pulseNow);
 
-    this.hud(now);
+    this.hud(now, fx);
     this.deck.update({ sustain: this.src.sustain?.() });
     const live = this.bursts.findLast((b) => !b.loop && !b.ghost && b.held.size);
     this.deck.lightKeys(live ? [...live.held] : [], live?.color ?? [0, 0, 0], this.src.loopSlots?.());
@@ -312,9 +362,10 @@ export class Stage {
 
   // ---------- readable text layer ----------
 
-  hud(now) {
+  hud(now, fx) {
     const g = this.h, d = this.dpr, W = this.W, H = this.H;
     g.clearRect(0, 0, W, H);
+    this.drawBikes(g, now, this.pulseNow ?? [], 1 - fx.reverb * 0.45); // under the text
     const { seq, looper, chords, engine } = this.src;
     const tnow = performance.now();
     const pad = 26 * d;
