@@ -51,7 +51,17 @@ Write it to `jam/takes/<NN>-<short-name>.json` (count up from the takes already 
   (also `chorus`, `wobble`, `reverb`). Drive at 1 is as filthy as daisy goes. A page loaded before
   2026-10-09 20:50 ignores `fx` until it's reloaded.
 - The solo can last several times round the loop (e.g. 8 bars over a 4-bar loop). It plays once,
-  then stops.
+  then stops, unless `"repeat": true`: then it goes round every `"bars"` bars (default: up to its
+  last note) until replaced or stopped (`python3 tools/jam.py stop [part]`).
+- **Parts**: `"part": "lead"` is the default. A solo replaces the one on the same part and plays
+  *alongside* other parts. With nothing playing it comes in at the top of the loop; next to other
+  parts it waits for the moment they all began (plus whole times round its own `bars`), so write a
+  second part against the first part's cycle. Leave each other room: different registers, and
+  gaps where the other one speaks.
+- **Polymeter** (a solo phrased in another time signature, drifting over the loop): daisy only
+  knows the loop's bars, so work the phrase out in 16ths in a small script and convert to the
+  loop's bar/beat. It lines up again after the lowest common multiple of the phrase and the loop
+  (6/4 over a 4-bar 4/4 loop: 24 and 64 sixteenths -> 192 = 12 bars). Set `bars` to that cycle.
 - `sound` is optional: `lead` (Singing Lead, the default) or any daisy preset id (`velvet`,
   `sunday`, `honey`, `cassette`, `piano`, `rhythm`, `crunch`). `piano` (Pub Piano) is the acoustic-ish
   piano: use it for piano solos (Ben Folds, Elton, boogie). `crunch` (Crunch Guitar) is an overdriven electric

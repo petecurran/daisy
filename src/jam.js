@@ -10,6 +10,8 @@
 // A solo is a list of notes, each [bar, beat, note, beats, velocity?, expression?]: bar and beat
 // count from 1 at the top of the loop (beats in the time signature's pulse), note is a MIDI number
 // or a name like "E4", and expression is { from, slide, bend, release, vib } (see Voice.express).
+// `part` names the voice it plays (solos on different parts play together), `repeat` keeps it
+// going round, every `bars` bars, until it's replaced or stopped ({ "stop": true | part }).
 
 import { ALL_PRESETS } from './audio/presets.js';
 import { patternsFor } from './drums/patterns.js';
@@ -44,7 +46,8 @@ export class Jam {
     this.looper = looper;
     this.key = key;
     this.setKey = setKey;
-    this.solo = null; // { title, sound, byStep, steps, state: 'cued' | 'playing', start, overLoop }
+    this.solos = new Map(); // part -> { title, sound, byStep, steps, repeat, state: 'cued' | 'playing', start, overLoop }
+    this.origin = null; // the step the parts playing now first came in on: later parts line up with it
     this.after = Date.now() / 1000; // only solos written from now on (not one left from last time)
     this.shared = '';
     this.recorders = 0;
@@ -205,7 +208,9 @@ export class Jam {
       if (res.status === 200) {
         this.after = +res.headers.get('X-Written') || Date.now() / 1000;
         try {
-          this.cue(this.parse(await res.json()));
+          const data = await res.json();
+          if (data.stop) this.stopParts(data.stop === true ? null : data.stop);
+          else this.cue(this.parse(data));
         } catch (e) {
           console.warn('Claude\'s solo didn\'t make sense:', e);
           bus.emit('hint', { text: 'Claude\'s solo didn\'t load' });
@@ -240,32 +245,49 @@ export class Jam {
     const preset = ALL_PRESETS.find((p) => p.id === data.sound) ?? ALL_PRESETS.find((p) => p.id === 'lead');
     // `fx` overrides the sound's own pedals and sends (drive, chorus, wobble, echo, reverb: 0..1).
     const fx = { ...preset.fx, ...data.fx };
-    return { title: data.title || 'Claude', preset, fx, level: data.level ?? 1, byStep, steps: Math.ceil(end / barSteps) * barSteps };
+    // A repeating solo goes round every `bars` bars (it can be longer than its last note).
+    const steps = data.bars ? data.bars * barSteps : Math.ceil(end / barSteps) * barSteps;
+    return {
+      title: data.title || 'Claude', part: data.part || 'lead', repeat: !!data.repeat,
+      preset, fx, level: data.level ?? 1, byStep, steps,
+    };
   }
 
-  // A new solo replaces any that's playing, and waits for the top of the loop.
+  // Solos are parts: a new one replaces the one playing the same part, and plays alongside the
+  // others. With nothing else playing it comes in at the top of the loop; next to other parts it
+  // waits until it lines up with them (the moment they all began, plus whole times round).
   cue(solo) {
-    this.stop();
+    this.stopParts(solo.part);
     const sound = new Sound(this.engine, solo.preset, { values: solo.fx, level: solo.level });
-    this.solo = { ...solo, sound, state: 'cued' };
-    bus.emit('hint', { text: 'Claude has a solo: in at the top of the loop', color: solo.preset.color, sticky: true });
+    this.solos.set(solo.part, { ...solo, sound, state: 'cued' });
+    const others = this.playing().length;
+    bus.emit('hint', { text: `Claude has a solo: in ${others ? 'when it lines up' : 'at the top of the loop'}`, color: solo.preset.color, sticky: true });
   }
 
-  // Cut it off (replaced, or the loop went away).
-  stop() {
-    if (!this.solo) return;
-    this.stopRecording(this.solo, 0);
-    this.engine.dropSound(this.solo.sound);
-    if (this.solo.state === 'cued') bus.emit('hint', null);
-    this.solo = null;
+  playing() {
+    return [...this.solos.values()].filter((s) => s.state === 'playing');
   }
+
+  // Cut parts off (one part, or all of them): replaced, stopped from the chat, or the loop went away.
+  stopParts(part = null) {
+    for (const s of [...this.solos.values()]) {
+      if (part && s.part !== part) continue;
+      this.stopRecording(s, 0);
+      this.engine.dropSound(s.sound);
+      if (s.state === 'cued') bus.emit('hint', null);
+      this.solos.delete(s.part);
+    }
+    if (!this.solos.size) this.origin = null;
+  }
+
+  stop() { this.stopParts(); }
 
   // Played to the end: let the last notes ring out before unplugging its sound.
-  finish() {
-    const { sound } = this.solo;
-    this.stopRecording(this.solo, 3000);
-    this.solo = null;
-    setTimeout(() => this.engine.dropSound(sound), 3000);
+  finish(s) {
+    this.stopRecording(s, 3000);
+    this.solos.delete(s.part);
+    if (!this.solos.size) this.origin = null;
+    setTimeout(() => this.engine.dropSound(s.sound), 3000);
   }
 
   // ---------- recording ----------
@@ -301,21 +323,36 @@ export class Jam {
     return looper.state === 'empty' && step % this.seq.sig.barSteps === 0;
   }
 
+  // Where a cued solo can come in: the top of the loop, and in step with any parts already playing.
+  startsAt(s, step) {
+    if (!this.isTop(step)) return false;
+    return this.origin == null || (step - this.origin) % s.steps === 0;
+  }
+
   // ---------- playback: called by the sequencer for every scheduled step ----------
 
   onSchedule(step, t) {
-    const s = this.solo;
-    if (!s) return;
+    for (const s of [...this.solos.values()]) this.playSolo(s, step, t);
+  }
+
+  playSolo(s, step, t) {
     if (s.state === 'cued') {
-      if (this.isTop(step + this.seq.sig.barSteps)) this.startRecording(s);
-      if (!this.isTop(step)) return;
+      if (this.startsAt(s, step + this.seq.sig.barSteps)) this.startRecording(s);
+      if (!this.startsAt(s, step)) return;
       this.startRecording(s); // came in with less than a bar to go
+      this.origin ??= step;
       Object.assign(s, { state: 'playing', start: step, overLoop: this.looper.hasLoop });
       bus.emitAt(this.engine.ctx, t, 'hint', { text: s.title, color: s.preset.color });
     }
-    const rel = step - s.start;
-    if (rel < 0 || (s.overLoop && !AUDIBLE.includes(this.looper.state))) return this.stop();
-    if (rel >= s.steps) return this.finish();
+    let rel = step - s.start;
+    if (rel < 0 || (s.overLoop && !AUDIBLE.includes(this.looper.state))) return this.stopParts(s.part);
+    if (rel >= s.steps) {
+      // The recording is one time through (with whatever else was playing alongside).
+      this.stopRecording(s, 3000);
+      if (!s.repeat) return this.finish(s);
+      s.start += s.steps;
+      rel = 0;
+    }
     const stepDur = this.seq.stepDur;
     for (const n of s.byStep.get(rel) || []) {
       this.engine.playNote(n.note, n.vel, s.sound, t + (n.at - rel) * stepDur, Math.max(0.03, n.len * stepDur - 0.01), n.expr);
