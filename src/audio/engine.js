@@ -167,10 +167,12 @@ export class Engine {
     for (const note of [...this.voices.keys()]) this.noteOff(note);
   }
 
-  // A note with a known start and length, in a loop layer's sound: looper playback.
-  playNote(note, velocity, sound, start, duration) {
+  // A note with a known start and length, in a loop layer's sound: looper playback (and Claude's
+  // solos, which can bend and slide: see Voice.express).
+  playNote(note, velocity, sound, start, duration, expression) {
     this.makeRoom(true);
     const v = new Voice(this, sound, note, velocity, start, false);
+    if (expression) v.express(expression, Math.max(start, this.ctx.currentTime), duration);
     v.loop = true;
     v.release(sound.releaseMult, start + duration);
     this.all.push(v);

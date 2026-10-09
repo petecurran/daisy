@@ -22,6 +22,8 @@ WebGL, ES modules, **no build step and no dependencies**.
 - `src/visuals/` — stage (Tree Rings in WebGL + canvas HUD), deck (on-screen MPK), pixel
   lettering (`pixelText.js`, `chordLabel.js`, `logo.js`), chord colours.
 - `src/bus.js` — tiny event bus between audio and visuals.
+- `src/jam.js` + `tools/jam.py` + `.claude/skills/solo` — Claude solos over the loop: daisy posts
+  the loop to `jam/loop.json` via the server and plays `jam/solo.json` when it changes (`/solo`).
 
 ## Working on it
 

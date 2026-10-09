@@ -16,6 +16,7 @@ export class Voice {
     this.sources = [];
     this.pitchParams = []; // every AudioParam (cents) that pitch bend / vibrato / drift should move
     this.detunes = new Map(); // pitch param -> its oscillator's own fixed detune (cents)
+    this.bases = new Map(); // pitch param -> where it rests (detune + drift), for solo bends
 
     const t = Math.max(when ?? 0, ctx.currentTime);
     const vel = velocity / 127;
@@ -72,6 +73,7 @@ export class Voice {
     for (const p of this.pitchParams) {
       const base = drift + (this.detunes.get(p) ?? 0);
       p.value = base;
+      this.bases.set(p, base);
       if (expressive) {
         engine.bend.connect(p);
         engine.vibrato.connect(p);
@@ -141,6 +143,46 @@ export class Voice {
       b.start(t);
       this.sources.push(b);
       this.pitchParams.push(b.detune);
+    }
+  }
+
+  // A solo note's own expression, scheduled on its pitch (semitones):
+  //   from: start this far off and slide onto the note (a scoop, or a slide from the last note)
+  //   bend: bend up (or down) this far, a little way into the note; with `release`, back down
+  //         before it ends
+  //   vib:  0..1 vibrato that blooms once the note has settled
+  express({ from, bend, release, vib }, t, dur) {
+    const slide = Math.min(0.09, dur * 0.4);
+    const bendAt = t + Math.min(0.22, dur * 0.3);
+    const bendTime = Math.min(0.16, dur * 0.3);
+    for (const p of this.pitchParams) {
+      const base = this.bases.get(p);
+      if (from) {
+        p.setValueAtTime(base + from * 100, t);
+        p.linearRampToValueAtTime(base, t + slide);
+      }
+      if (bend) {
+        p.setValueAtTime(base, bendAt);
+        p.linearRampToValueAtTime(base + bend * 100, bendAt + bendTime);
+        if (release && dur > 0.5) {
+          const back = t + dur - Math.min(0.2, dur * 0.25);
+          p.setValueAtTime(base + bend * 100, back);
+          p.linearRampToValueAtTime(base, back + Math.min(0.15, dur * 0.2));
+        }
+      }
+    }
+    if (vib) {
+      const lfo = this.ctx.createOscillator();
+      lfo.frequency.value = 5.4;
+      const depth = this.ctx.createGain();
+      const bloom = t + Math.min(0.3, dur * 0.4);
+      depth.gain.setValueAtTime(0, t);
+      depth.gain.setValueAtTime(0, bloom);
+      depth.gain.linearRampToValueAtTime(vib * 45, bloom + 0.35);
+      lfo.connect(depth);
+      for (const p of this.pitchParams) depth.connect(p);
+      lfo.start(t);
+      this.sources.push(lfo);
     }
   }
 

@@ -4,8 +4,21 @@
     {
       "name": "daisy",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["tools/serve.py", "5173"],
+      "runtimeArgs": [
+        "tools/serve.py",
+        "5173"
+      ],
       "port": 5173
+    },
+    {
+      "name": "daisy-test",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "tools/serve.py",
+        "5174",
+        "/tmp/claude-1000/-home-pete-curran-Documents-VibeSynth/ababeaf3-262e-474e-bca9-a47d4278b84b/scratchpad/jam"
+      ],
+      "port": 5174
     }
   ]
 }

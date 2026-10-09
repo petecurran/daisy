@@ -100,7 +100,26 @@ export const ALL_PRESETS = [
     pitchEnv: { cents: -35, time: 0.12 },
     fx: { drive: 0.15, chorus: 0.55, wobble: 0.05, echo: 0.2, reverb: 0.75 },
   },
+  {
+    id: 'lead',
+    guest: true,
+    name: 'Singing Lead',
+    inspired: 'Minimoog lead',
+    blurb: 'Warm, a bit driven and sustaining, for Claude\'s solos: bends and vibrato like a guitar.',
+    color: '#ff7a6b',
+    oscs: [
+      { type: 'sawtooth', octave: 0, detune: -4, level: 0.5 },
+      { type: 'square', octave: 0, detune: 5, level: 0.3 },
+      { type: 'sawtooth', octave: -1, detune: 0, level: 0.18 },
+    ],
+    noise: 0.008,
+    filter: { cutoff: 1500, q: 2.2, env: 1500, keytrack: 0.6 },
+    fenv: { a: 0.012, d: 0.45, s: 0.5, r: 0.3 },
+    aenv: { a: 0.006, d: 0.5, s: 0.8, r: 0.3 },
+    fx: { drive: 0.4, chorus: 0.15, wobble: 0.05, echo: 0.3, reverb: 0.35 },
+  },
 ];
 
-// Glass Bells and Blade Brass didn't make the cut in the first tasting (2026-09-30).
-export const PRESETS = ALL_PRESETS.filter((p) => !p.retired);
+// Glass Bells and Blade Brass didn't make the cut in the first tasting (2026-09-30). Guests are
+// only played by Claude's solos, so they stay out of the keys' sound menu.
+export const PRESETS = ALL_PRESETS.filter((p) => !p.retired && !p.guest);

@@ -6,6 +6,7 @@ import { SIGNATURES, Sequencer } from './drums/sequencer.js';
 import { MidiClock } from './drums/clock.js';
 import { connectMidi } from './midi.js';
 import { Looper } from './looper.js';
+import { Jam } from './jam.js';
 import { bus } from './bus.js';
 import { Stage } from './visuals/stage.js';
 import { Logo } from './visuals/logo.js';
@@ -58,6 +59,7 @@ let chords = null;
 let seq = null;
 let clock = null;
 let looper = null;
+let jam = null;
 let stage = null;
 let midiOut = null;
 let presetIndex = 0;
@@ -213,6 +215,7 @@ function syncChordSettings() {
   chords.voicing = +$('voicing').value;
   chords.strumMs = +$('strum').value;
   chords.bass = $('bass').checked;
+  jam?.share();
 }
 ['key-tonic', 'key-mode', 'voicing', 'strum', 'bass'].forEach((id) => $(id).addEventListener('input', syncChordSettings));
 
@@ -357,6 +360,7 @@ function renderDrums() {
   sigButtons.querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.sig === seq.sigId));
   if (!seq.playing) showStep(-1);
   renderGrid();
+  jam?.share();
   if (knobPage === 'drums') renderKnobs();
 }
 
@@ -428,6 +432,7 @@ const LOOP_STATES = {
 
 function renderLooper() {
   if (!looper) return;
+  jam?.share();
   const [title, hint] = LOOP_STATES[looper.state];
   $('loop-state').textContent = title;
   $('loop-state').dataset.state = looper.state;
@@ -504,7 +509,11 @@ function ensureEngine() {
     clock.setOutput(midiOut);
     seq.onStart = (t) => clock.align(t); // arp locks to the drum grid
     looper = new Looper(engine, seq, { onState: renderLooper });
-    seq.onSchedule = (step, t) => looper.onSchedule(step, t);
+    jam = new Jam(engine, seq, looper, { key: () => chords.key });
+    seq.onSchedule = (step, t) => {
+      looper.onSchedule(step, t);
+      jam.onSchedule(step, t);
+    };
     stage = new Stage($('stage'), {
       engine, seq, looper, chords, joy,
       knobs: () => KNOB_PAGES[knobPage],
@@ -517,7 +526,7 @@ function ensureEngine() {
     engine.ctx.onstatechange = updateSplash;
     // Handy in the devtools console, and for testing without the MPK plugged in.
     window.daisy = {
-      engine, seq, looper, chords, stage,
+      engine, seq, looper, chords, stage, jam,
       pad: (i, down) => onPad(PAD_A + i, 100, down),
       key: (n, down) => (down ? keyDown(n, 100) : keyUp(n)),
       cc: (cc, value) => midiHandlers.onCC(cc, value),
