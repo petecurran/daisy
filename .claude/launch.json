@@ -16,7 +16,7 @@
       "runtimeArgs": [
         "tools/serve.py",
         "5174",
-        "/tmp/claude-1000/-home-pete-curran-Documents-VibeSynth/ababeaf3-262e-474e-bca9-a47d4278b84b/scratchpad/jam"
+        "jam-test"
       ],
       "port": 5174
     }

@@ -48,8 +48,8 @@ Write it to `jam/takes/<NN>-<short-name>.json` (count up from the takes already 
   previous note; `bend` bends up partway through (`release: true` lets it back down before the
   end); `vib` 0-1 is vibrato that blooms on long notes. These make it sound played, not typed.
 - `fx` (optional) sets the sound's pedals for this solo, each 0-1: `{"drive": 1, "echo": 0.1}`
-  (also `chorus`, `wobble`, `reverb`). Drive at 1 is as filthy as daisy goes. A page loaded before
-  2026-10-09 20:50 ignores `fx` until it's reloaded.
+  (also `chorus`, `wobble`, `reverb`). Drive at 1 is as filthy as daisy goes. `level` (default 1)
+  is the part's volume: push it to 1.3-1.8 for parts that sit low, like a bass.
 - The solo can last several times round the loop (e.g. 8 bars over a 4-bar loop). It plays once,
   then stops, unless `"repeat": true`: then it goes round every `"bars"` bars (default: up to its
   last note) until replaced or stopped (`python3 tools/jam.py stop [part]`).
@@ -78,9 +78,16 @@ python3 tools/jam.py play jam/takes/01-easing-in.json
 ```
 
 It checks the notes, lists any outside the key (fine if they're meant), hands it to daisy, and
-keeps a copy of the loop next to the take (`<take>.loop.json`). daisy records every solo as it
-plays, loop and drums included, into `jam/recordings/` (the user can listen back at
-http://localhost:5173/jam/recordings/).
+keeps a copy of the loop next to the take (`<take>.loop.json`).
+
+- **Duets / several parts at once**: name all the files in one `play`
+  (`python3 tools/jam.py play jam/takes/12-a.json jam/takes/12-b.json`). They're handed over
+  together, so they always start together. (Two separate `play`s can land either side of the top
+  of the loop, and the second part then waits a whole cycle.)
+- **Recording**: daisy records every solo as it plays, loop and drums included, into
+  `jam/recordings/` (small audio files, oldest removed past 300 MB; listen back at
+  http://localhost:5173/jam/recordings/). Add `--video` to film the stage as well, only when the
+  user wants a video: those files are much bigger.
 Then tell the user in a line or two what you went for, and offer to take another. "Again" means
 running `play` on the same file. To change something, write a new take (keep the old ones, so they
 can go back to one).

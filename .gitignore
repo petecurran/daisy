@@ -1,3 +1,4 @@
 node_modules/
 .DS_Store
 jam/
+jam-test/
