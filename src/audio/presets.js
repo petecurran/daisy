@@ -70,6 +70,26 @@ export const ALL_PRESETS = [
     fx: { drive: 0.2, chorus: 0.4, wobble: 0.85, echo: 0.3, reverb: 0.4 },
   },
   {
+    id: 'crunch',
+    name: 'Crunch Guitar',
+    inspired: 'Les Paul into a cranked Marshall',
+    blurb: 'Overdriven electric guitar. Chords crunch, single notes sing and sustain.',
+    color: '#e0464e',
+    oscs: [
+      { type: 'sawtooth', octave: 0, detune: -3, level: 0.45 },
+      { type: 'square', octave: 0, detune: 4, level: 0.3 },
+      { type: 'sawtooth', octave: 1, detune: 0, level: 0.08 },
+    ],
+    noise: 0.004,
+    // Dark going into the amp, so the drive growls rather than fizzes; the pick attack is the
+    // filter snapping open and the string settling from a touch sharp.
+    filter: { cutoff: 1300, q: 1.8, env: 2400, keytrack: 0.6 },
+    fenv: { a: 0.002, d: 0.6, s: 0.35, r: 0.2 },
+    aenv: { a: 0.002, d: 2.5, s: 0.45, r: 0.12 },
+    pitchEnv: { cents: 12, time: 0.04 },
+    fx: { drive: 0.7, chorus: 0.12, wobble: 0.0, echo: 0.22, reverb: 0.25 },
+  },
+  {
     id: 'glass',
     retired: true,
     name: 'Glass Bells',

@@ -50,7 +50,8 @@ Write it to `jam/takes/<NN>-<short-name>.json` (count up from the takes already 
 - The solo can last several times round the loop (e.g. 8 bars over a 4-bar loop). It plays once,
   then stops.
 - `sound` is optional: `lead` (Singing Lead, the default) or any daisy preset id (`velvet`,
-  `sunday`, `honey`, `cassette`).
+  `sunday`, `honey`, `cassette`, `crunch`). `crunch` (Crunch Guitar) is an overdriven electric
+  guitar: the one to use when the user asks for guitar, rock or metal.
 
 ## 3. Hand it over
 
