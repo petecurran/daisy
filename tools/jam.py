@@ -85,7 +85,7 @@ def chart():
     bar, beat = loop['barSteps'], loop['beatSteps']
     age = datetime.now(timezone.utc) - datetime.fromisoformat(loop['saved'].replace('Z', '+00:00'))
     print(f"Loop: {loop['bars']:g} bars of {loop['sig']} at {loop['bpm']} bpm, key {loop['key']}, "
-          f"drums {loop['drums']} (swing {loop['swing']}). Shared {int(age.total_seconds() // 60)} min ago.")
+          f"drums {loop['drums']}{' on the ' + loop['kit'] + ' kit' if loop.get('kit') else ''} (swing {loop['swing']}). Shared {int(age.total_seconds() // 60)} min ago.")
     print(f"One bar = {bar} sixteenths, one beat = {beat}.")
     for i, layer in enumerate(loop['layers'], 1):
         notes = [n[1] for n in layer['notes']]

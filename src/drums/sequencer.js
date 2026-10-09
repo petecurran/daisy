@@ -53,11 +53,11 @@ export class Sequencer {
     this.setPattern(list[(i + dir + list.length) % list.length]);
   }
 
-  // From the top, or (after pause) from exactly where it was frozen.
-  start() {
+  // From the top (or from step `from`), or after a pause from exactly where it was frozen.
+  start(from = 0) {
     if (this.playing) return;
     this.playing = true;
-    if (!this.paused) this.step = 0;
+    if (!this.paused) this.step = from;
     this.paused = false;
     this.nextTime = this.ctx.currentTime + 0.06;
     this.onStart?.(this.nextTime);

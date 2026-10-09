@@ -13,6 +13,7 @@
 
 import { ALL_PRESETS } from './audio/presets.js';
 import { patternsFor } from './drums/patterns.js';
+import { KITS } from './drums/kit.js';
 import { Sound } from './audio/sound.js';
 import { NOTE_NAMES } from './chords.js';
 import { bus } from './bus.js';
@@ -75,11 +76,22 @@ export class Jam {
     if (seq.sigId !== loop.sig) seq.setSignature(loop.sig);
     const pattern = patternsFor(loop.sig).find((p) => p.name === loop.drums);
     if (pattern) seq.setPattern(pattern);
-    seq.setBpm(loop.bpm);
+    // The whole drum setup, as the loop was made with it (older loops only kept the tempo).
+    const { drums } = this.engine;
+    if (loop.swing != null) seq.swing = loop.swing;
+    if (loop.busy != null) seq.busy = loop.busy;
+    const kit = KITS.findIndex((k) => k.name === loop.kit);
+    if (kit >= 0) drums.setKit(kit);
+    if (loop.drumTone != null) drums.setTone(loop.drumTone);
+    if (loop.drumLevel != null) drums.setLevel(loop.drumLevel);
+    if (loop.pump != null) this.engine.pump = loop.pump;
+    seq.setBpm(loop.bpm); // last: it redraws the drum page with all of the above
     this.engine.syncEcho(seq.bpm);
     const [tonic, mode] = loop.key.split(' ');
     this.setKey(NOTE_NAMES.indexOf(tonic), mode);
-    this.looper.restore(loop);
+    // Loops from before drumPhase was kept were nearly always recorded from stopped drums, after
+    // a one-bar count-in.
+    this.looper.restore({ ...loop, drumPhase: loop.drumPhase ?? loop.barSteps });
     this.slot = Number.isInteger(loop.slot) ? loop.slot : null;
     this.shared = JSON.stringify(this.snapshot());
     if (this.slot == null) {
@@ -166,8 +178,11 @@ export class Jam {
     if (!looper.layers.length) return null;
     const { id, barSteps, beatSteps } = seq.sig;
     const key = this.key();
+    const { drums } = this.engine;
     return {
       bpm: seq.bpm, sig: id, barSteps, beatSteps, swing: seq.swing, drums: seq.pattern.name,
+      kit: drums.kit.name, busy: seq.busy, drumTone: drums.toneAmount, drumLevel: drums.level, pump: this.engine.pump,
+      drumPhase: looper.drumPhase,
       key: `${NOTE_NAMES[key.tonic]} ${key.mode}`,
       steps: looper.length, bars: looper.bars,
       // Each note: [step from the top of the loop (16ths), MIDI note, length in 16ths, velocity]

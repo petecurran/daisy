@@ -661,6 +661,7 @@ const midiHandlers = {
     if (cc >= 1 && cc <= 8) logo.knob(cc - 1, v);
     if (!engine || cc < 1 || cc > 8) return;
     KNOB_PAGES[knobPage][cc - 1].set(v);
+    jam?.share(); // the loop keeps its drum settings (and tells Claude about them)
     showKnob(cc - 1);
     bus.emit('knob', { index: cc - 1, page: knobPage, value: v });
   },

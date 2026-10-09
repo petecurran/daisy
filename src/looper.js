@@ -31,6 +31,7 @@ export class Looper {
     this.current = null; // layer being recorded
     this.start = 0; // global step where the loop begins
     this.length = 0; // loop length in steps
+    this.drumPhase = null; // where in the drum pattern the loop began when it was recorded
     this.pending = new Map(); // note -> { pos, vel }
     this.sounding = new Map(); // live notes held right now: note -> vel
     this.lastTap = { time: 0, action: null };
@@ -114,6 +115,7 @@ export class Looper {
     // Round to whole bars; a tap slightly late (first quarter of a bar) still closes the bar before.
     const bars = Math.max(1, Math.ceil(rel / bar - 0.25));
     this.length = bars * bar;
+    this.drumPhase = this.start % this.seq.length;
     this.finishPending();
     this.current.events = this.current.events.map((e) => ({ ...e, step: e.step % this.length }));
     this.commit();
@@ -138,14 +140,28 @@ export class Looper {
   }
 
   resume() {
-    if (!this.seq.playing) {
-      this.start = this.resumeBar();
+    if (this.seq.playing) {
+      this.start = this.alignedStart(this.seq.nextBarStep());
+    } else if (this.seq.paused) {
+      this.start = this.alignedStart(this.resumeBar());
       this.seq.start();
     } else {
-      this.start = this.seq.nextBarStep();
+      this.start = this.drumPhase ?? 0; // start the drums where they were in their pattern
+      this.seq.start(this.start);
     }
     this.setState('playing');
     return 'resume';
+  }
+
+  // The first bar line at or after `from` where the drums are at the same place in their pattern
+  // as when the loop was recorded, so a two-bar groove never comes in flipped against the chords.
+  alignedStart(from) {
+    const len = this.seq.length;
+    if (this.drumPhase == null) return from;
+    for (let s = from; s < from + len + this.seq.sig.barSteps; s += this.seq.sig.barSteps) {
+      if (s % len === this.drumPhase % len) return s;
+    }
+    return from;
   }
 
   // The first bar line the transport will reach once started: the top if it's stopped, the next
@@ -178,13 +194,14 @@ export class Looper {
     for (const l of this.layers) this.engine.dropSound(l.sound);
     this.layers = [];
     this.length = 0;
+    this.drumPhase = null;
     this.engine.stopLoopVoices();
     this.engine.setLoopLevel(1); // a fresh loop starts at full level
     this.setState('empty');
   }
 
   // Bring back a shared loop (jam/loop.json) after a reload, stopped: tap to play it.
-  restore({ steps, layers }) {
+  restore({ steps, layers, drumPhase }) {
     this.clear();
     for (const l of layers) {
       const preset = ALL_PRESETS.find((p) => p.id === l.preset) ?? ALL_PRESETS.find((p) => p.name === l.sound);
@@ -200,6 +217,7 @@ export class Looper {
     }
     if (!this.layers.length) return;
     this.length = steps;
+    this.drumPhase = drumPhase ?? null;
     this.setState('stopped');
   }
 
