@@ -9,6 +9,7 @@ import { SHIMMER, analyzeChord, chordColor } from './chordColor.js';
 import { ChordLabel } from './chordLabel.js';
 
 const CHORD_GAP_MS = 70; // notes closer together than this belong to the same chord
+const hexRgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
 const ICON_PATHS = Object.fromEntries(Object.entries(ICON).map(([k, d]) => [k, new Path2D(d)]));
 
 // Full-screen stage: the Tree Rings (GPU) underneath, a crisp text layer on top, and
@@ -32,6 +33,8 @@ export class Stage {
     }
     this.look = 0;
     this.bursts = [];
+    this.drops = []; // Claude's solo notes, rippling on the rings
+    this.riders = new Map(); // solo part -> where its sweep round the rings is
     this.pulse = 0;
     this.shimmer = 0;
     this.flash = 0;
@@ -85,6 +88,7 @@ export class Stage {
   listen() {
     bus.on('note', (e) => this.onNote(e));
     bus.on('noteoff', (e) => this.onNoteOff(e));
+    bus.on('solo', (e) => this.onSolo(e));
     bus.on('chord', (e) => this.label.chord(e.name));
     bus.on('drum', (e) => this.onDrum(e));
     bus.on('knob', (e) => { this.popup = { ...e, at: performance.now() }; });
@@ -131,6 +135,62 @@ export class Stage {
         return;
       }
     }
+  }
+
+  // A solo note lands a third of the way out, on whichever ring is passing there, round the circle
+  // by where it falls in the solo's own bar (left to right, once a bar). Then it rides out with
+  // that ring. Higher notes sit further out in the band.
+  onSolo({ part, note, vel, dur, expr, frac, sweepSec, color, square }) {
+    const now = performance.now() / 1000;
+    const ring = this.ringAt(this.rideRadius, now);
+    const rgb = hexRgb(color);
+    const behind = this.ringEdge(ring, now, now) - this.rideRadius; // how far inside its ring's edge
+    this.drops.push({ ring, born: now, behind, angle: Math.PI * (1 - frac), note, vel, dur, expr, color: rgb, square });
+    if (this.drops.length > 60) this.drops.shift();
+    this.riders.set(part, { frac, at: now, sweepSec, color: rgb, square, note });
+  }
+
+  // Where a ring's leading edge is now (as in ringList), or a ring born at `born` if there's none.
+  ringEdge(ring, born, now) {
+    return (now - (ring?.born ?? born)) * (this.ringSpeed ?? 100) + 14 * this.dpr;
+  }
+
+  get rideRadius() { return (this.maxR ?? 800) * 0.3; }
+
+  // The ring whose band covers radius r: the newest one whose edge is already past it.
+  ringAt(r, now) {
+    for (let i = this.bursts.length - 1; i >= 0; i--) {
+      const b = this.bursts[i];
+      if (!b.ghost && b.color && this.ringEdge(b, now, now) > r) return b;
+    }
+    return null;
+  }
+
+  // Each note's ripple centre: on its ring, deeper in the band for lower notes. Bends drift it
+  // across the band, vibrato wobbles it round; it rings while the note lasts, then dies away.
+  dropList(now) {
+    const out = [];
+    const lane = (p) => (Math.min(1, Math.max(0, (p - 40) / 50)) - 0.5) * 70 * this.dpr; // higher = further out
+    this.drops = this.drops.filter((d) => now - d.born < d.dur + 7);
+    for (const d of this.drops) {
+      const age = now - d.born;
+      const e = d.expr ?? {};
+      let pitch = d.note;
+      if (e.bend) pitch += e.bend * Math.min(1, Math.max(0, (age - Math.min(0.22, d.dur * 0.3)) / 0.16));
+      const r = Math.max(0, this.ringEdge(d.ring, d.born, now) - d.behind + lane(pitch));
+      const ang = d.angle + (e.vib ? Math.sin(age * 34) * 0.012 * e.vib : 0);
+      // Strong while the note sounds, then a long settle as it rides out to the edge.
+      const fade = age < d.dur ? Math.min(1, age / 0.03) : 0.35 * Math.exp(-(age - d.dur) / 2.5);
+      out.push({ x: Math.cos(ang) * r, y: Math.sin(ang) * r, amp: (d.vel / 127) * fade, age, color: d.color, square: d.square });
+    }
+    // The riders themselves: a faint stir where each part's sweep is now.
+    for (const [part, rd] of this.riders) {
+      if (now - rd.at > 2) { this.riders.delete(part); continue; }
+      const frac = (rd.frac + (now - rd.at) / rd.sweepSec) % 1;
+      const ang = Math.PI * (1 - frac), r = this.rideRadius + lane(rd.note);
+      out.push({ x: Math.cos(ang) * r, y: Math.sin(ang) * r, amp: 0.3, age: (now * 0.9) % 1.4, color: rd.color, square: rd.square });
+    }
+    return out.slice(-24);
   }
 
   onDrum({ sound, vel }) {
@@ -208,7 +268,8 @@ export class Stage {
     const fx = this.fx();
 
     const look = this.looks[this.look];
-    look?.render(dt, now, fx, this.ringList(now, fx), [this.originCss[0] * this.dpr, this.H - this.originCss[1] * this.dpr]);
+    const rings = this.ringList(now, fx);
+    look?.render(dt, now, fx, rings, [this.originCss[0] * this.dpr, this.H - this.originCss[1] * this.dpr], this.dropList(now));
 
     this.hud(now);
     this.deck.update({ sustain: this.src.sustain?.() });
@@ -233,7 +294,7 @@ export class Stage {
   // Newest chord first; each band runs from the previous (newer) chord's edge to its own.
   ringList(now, fx) {
     const history = 12 + fx.reverb * 5; // reverb: slower waves that linger (and the camera pulls back)
-    const speed = this.maxR / history;
+    const speed = (this.ringSpeed = this.maxR / history);
     fx.echoGap = this.src.engine.fx.echoDelay.delayTime.value * speed; // echo ghosts, one delay apart
     fx.maxR = this.maxR;
     const rings = [];

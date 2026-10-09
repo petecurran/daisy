@@ -5,11 +5,15 @@
 // Knobs reshape the waves: wobble bends, resonance makes the edges ring, chorus doubles, echo
 // leaves ghost edges, drive turns it grungy (dark, gritty, glitching), reverb pulls the camera
 // back into the distance.
+// Claude's solos are pond ripples riding the rings: each note disturbs the water where it lands
+// and its waves push the pixels around them (see Stage.dropList).
 
 const MAX = 32;
+const MAXD = 24;
 
 const FRAG = `
 #define MAX ${MAX}
+#define MAXD ${MAXD}
 #define PI 3.14159265
 uniform int count;
 uniform float radii[MAX];     // leading edge of each chord's band (px), newest first
@@ -18,6 +22,9 @@ uniform float alive[MAX];     // 1 while held, fading after release
 uniform float seeds[MAX];
 uniform vec4 phase[MAX];      // cos/sin of each ring's two wobble phases (worked out on the CPU)
 uniform float sparkle[MAX];   // extra glitter for colourful chords (9ths etc.)
+uniform int dropCount;
+uniform vec4 drops[MAXD];     // solo ripples: centre (same space as the rings), strength, age (s)
+uniform vec4 dropInfo[MAXD];  // their part's colour, and how square (driven) their waves are
 uniform vec2 origin, res;
 uniform float maxR;
 uniform float time, pulse, ripple, rippleAmp, shimmer, scatter, wobble, ringing, split, echoGap, echo, cell, heat, exposure, zoom, reverb, dpr;
@@ -136,6 +143,24 @@ void main() {
 
   // Reverb pulls the camera back: everything shrinks into the distance.
   vec2 d = (frag - origin) / zoom;
+
+  // Solo ripples. Each pushes the pixels around it out and back as its waves pass, and its
+  // crests catch a little of its part's colour.
+  vec3 glint = vec3(0.0);
+  float wave = 34.0 * dpr, reach = 110.0 * dpr, speed = 150.0 * dpr;
+  for (int i = 0; i < MAXD; i++) {
+    if (i >= dropCount) break;
+    vec2 v = d - drops[i].xy;
+    float dist = length(v);
+    // The waves keep running outward; the disturbed patch stops growing once it's a few waves wide.
+    float run = drops[i].w * speed, front = min(run, reach * 2.5);
+    float env = drops[i].z * exp(-dist / reach) * smoothstep(front + wave, front - wave, dist);
+    if (env < 0.002) continue;
+    float s = sin((dist - run) * 6.2832 / wave);
+    s = mix(s, sign(s), dropInfo[i].w); // driven solos: choppy, square waves
+    d += v / max(dist, 1.0) * s * env * 22.0 * dpr;
+    glint += dropInfo[i].rgb * env * max(s, 0.0) * 1.1;
+  }
   float r = length(d);
   float ang = atan(d.y, d.x); // full circle: the waves carry on below and around the deck
 
@@ -153,6 +178,7 @@ void main() {
   }
   vec4 a = vec4(sin(ang * 6.0), cos(ang * 6.0), sin(ang * 13.0), cos(ang * 13.0));
   vec3 c = split > 0.5 ? chorus(r, ang, a) : shade(r, ang, a);
+  c += glint;
   c = vec3(1.0) - exp(-c * exposure * (1.0 + pulse * 0.3));
   float luma = dot(c, vec3(0.299, 0.587, 0.114));
   c = max(vec3(0.0), mix(vec3(luma), c, 1.15 + heat * 0.4));
@@ -187,6 +213,7 @@ export class Rings {
     this.scatter = 0;
     const f = (k) => new Float32Array(MAX * k); // reused every frame
     this.buf = { radii: f(1), colors: f(3), alive: f(1), seeds: f(1), phase: f(4), sparkle: f(1) };
+    this.dropBuf = { drops: new Float32Array(MAXD * 4), info: new Float32Array(MAXD * 4) };
   }
 
   resize() {}
@@ -199,7 +226,8 @@ export class Rings {
   snare(vel) { this.scatter = Math.min(1.2, this.scatter + vel * 0.6); }
 
   // rings: [{ radius, color: [r,g,b] 0..255, alive, seed, sparkle }], newest first, radius px.
-  render(dt, now, fx, rings, origin) {
+  // drops: [{ x, y, amp, age, color: [r,g,b] 0..255, square }], solo ripples (same space).
+  render(dt, now, fx, rings, origin, drops = []) {
     const { gl, blit } = this.ctx;
     this.ripple += dt * fx.rippleSpeed;
     this.rippleAmp *= 0.15 ** dt;
@@ -250,6 +278,16 @@ export class Rings {
     gl.uniform1f(u.reverb, fx.reverb);
     gl.uniform1f(u.dpr, d);
     gl.uniform2f(u.res, gl.drawingBufferWidth, gl.drawingBufferHeight);
+    const nd = Math.min(MAXD, drops.length);
+    const db = this.dropBuf;
+    for (let i = 0; i < nd; i++) {
+      const p = drops[i];
+      db.drops.set([p.x, p.y, p.amp, p.age], i * 4);
+      db.info.set([p.color[0] / 255, p.color[1] / 255, p.color[2] / 255, p.square], i * 4);
+    }
+    gl.uniform1i(u.dropCount, nd);
+    gl.uniform4fv(u.drops, db.drops);
+    gl.uniform4fv(u.dropInfo, db.info);
     blit(null);
   }
 }

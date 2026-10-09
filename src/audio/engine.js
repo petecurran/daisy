@@ -169,13 +169,14 @@ export class Engine {
 
   // A note with a known start and length, in a loop layer's sound: looper playback (and Claude's
   // solos, which can bend and slide: see Voice.express).
-  playNote(note, velocity, sound, start, duration, expression) {
+  playNote(note, velocity, sound, start, duration, expression, announce = true) {
     this.makeRoom(true);
     const v = new Voice(this, sound, note, velocity, start, false);
     if (expression) v.express(expression, Math.max(start, this.ctx.currentTime), duration);
     v.loop = true;
     v.release(sound.releaseMult, start + duration);
     this.all.push(v);
+    if (!announce) return; // solos tell the visuals themselves
     bus.emitAt(this.ctx, start, 'note', { note, vel: velocity, preset: sound.preset, loop: true });
     bus.emitAt(this.ctx, start + duration, 'noteoff', { note, loop: true });
   }

@@ -61,7 +61,9 @@ Write it to `jam/takes/<NN>-<short-name>.json` (count up from the takes already 
 - **Polymeter** (a solo phrased in another time signature, drifting over the loop): daisy only
   knows the loop's bars, so work the phrase out in 16ths in a small script and convert to the
   loop's bar/beat. It lines up again after the lowest common multiple of the phrase and the loop
-  (6/4 over a 4-bar 4/4 loop: 24 and 64 sixteenths -> 192 = 12 bars). Set `bars` to that cycle.
+  (6/4 over a 4-bar 4/4 loop: 24 and 64 sixteenths -> 192 = 12 bars). Set `bars` to that cycle,
+  and `"sweep"` to the phrase's bar in beats (6 for 6/4): on screen each note is a ripple riding
+  the rings, placed round the circle by where it falls in a sweep, so the solo drifts visibly.
 - `sound` is optional: `lead` (Singing Lead, the default) or any daisy preset id (`velvet`,
   `sunday`, `honey`, `cassette`, `piano`, `rhythm`, `crunch`). `piano` (Pub Piano) is the acoustic-ish
   piano: use it for piano solos (Ben Folds, Elton, boogie). `crunch` (Crunch Guitar) is an overdriven electric

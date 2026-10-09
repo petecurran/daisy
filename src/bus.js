@@ -1,7 +1,7 @@
 // Tiny event bus: the audio side announces what's happening; the visuals listen.
 //   note {note, vel, preset, loop}   noteoff {note}   drum {sound, vel}
 //   knob {index, page, value}         pad {index, down}   step {inBar, barSteps}
-//   chord {name}
+//   chord {name}   solo {part, note, vel, dur, expr, frac, sweepSec, color, square} (Claude's solos)
 
 const listeners = new Map();
 

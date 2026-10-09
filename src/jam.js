@@ -247,9 +247,12 @@ export class Jam {
     const fx = { ...preset.fx, ...data.fx };
     // A repeating solo goes round every `bars` bars (it can be longer than its last note).
     const steps = data.bars ? data.bars * barSteps : Math.ceil(end / barSteps) * barSteps;
+    // On screen the solo sweeps round the rings once per bar of its own time signature (`sweep`,
+    // in beats: 6 for a solo in 6/4), so a polymetric solo drifts against the rings.
+    const sweep = (data.sweep ?? barSteps / beatSteps) * beatSteps;
     return {
       title: data.title || 'Claude', part: data.part || 'lead', repeat: !!data.repeat,
-      preset, fx, level: data.level ?? 1, byStep, steps,
+      preset, fx, level: data.level ?? 1, byStep, steps, sweep,
     };
   }
 
@@ -355,7 +358,12 @@ export class Jam {
     }
     const stepDur = this.seq.stepDur;
     for (const n of s.byStep.get(rel) || []) {
-      this.engine.playNote(n.note, n.vel, s.sound, t + (n.at - rel) * stepDur, Math.max(0.03, n.len * stepDur - 0.01), n.expr);
+      const at = t + (n.at - rel) * stepDur, dur = Math.max(0.03, n.len * stepDur - 0.01);
+      this.engine.playNote(n.note, n.vel, s.sound, at, dur, n.expr, false);
+      bus.emitAt(this.engine.ctx, at, 'solo', {
+        part: s.part, note: n.note, vel: n.vel, dur, expr: n.expr, color: s.preset.color,
+        frac: (n.at % s.sweep) / s.sweep, sweepSec: s.sweep * stepDur, square: Math.max(0, (s.fx.drive ?? 0) - 0.3) / 0.7,
+      });
     }
   }
 }
