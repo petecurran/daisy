@@ -90,6 +90,26 @@ export const ALL_PRESETS = [
     fx: { drive: 0.7, chorus: 0.12, wobble: 0.0, echo: 0.22, reverb: 0.25 },
   },
   {
+    id: 'chug',
+    power: true,
+    name: 'Metal Chug',
+    inspired: 'High-gain amp, palm-muted, double-tracked',
+    blurb: 'Heavy rhythm guitar: power chords, tight and chuggy. Stab short for chugs, hold to ring.',
+    color: '#9aa3b5',
+    oscs: [
+      { type: 'sawtooth', octave: 0, detune: -6, level: 0.45 },
+      { type: 'sawtooth', octave: 0, detune: 6, level: 0.45 },
+      { type: 'square', octave: 0, detune: 0, level: 0.2 },
+    ],
+    // Palm mute: a low, resonant filter that snaps open on the pick and shuts fast (the thump),
+    // a quick fall to a quieter ring, and a very short release so stabs stop dead.
+    filter: { cutoff: 850, q: 2.6, env: 2200, keytrack: 0.4 },
+    fenv: { a: 0.001, d: 0.12, s: 0.12, r: 0.06 },
+    aenv: { a: 0.001, d: 0.3, s: 0.35, r: 0.06 },
+    pitchEnv: { cents: 8, time: 0.02 },
+    fx: { drive: 0.9, chorus: 0.15, wobble: 0.0, echo: 0.0, reverb: 0.1 },
+  },
+  {
     id: 'glass',
     retired: true,
     name: 'Glass Bells',

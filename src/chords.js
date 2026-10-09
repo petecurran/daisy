@@ -116,6 +116,13 @@ export class ChordPlayer {
   // voicing knob slides it through its inversions, up or down.
   chordFor(key) {
     const rootPc = key % 12;
+    // Heavy sounds (preset.power) play power chords: root, fifth and octave. Thirds and colours
+    // turn to mud through that much distortion, so the joystick leaves them alone.
+    if (this.engine.preset?.power) {
+      const notes = [key, key + 7, key + 12];
+      if (this.bass && key - 12 >= 28) notes.unshift(key - 12);
+      return { notes, name: NOTE_NAMES[rootPc] + '5' };
+    }
     const c = buildChord(rootPc, this.key, this.zone);
     const iv = intervals(c);
     const center = key + iv.reduce((a, b) => a + b, 0) / iv.length + this.voicing;

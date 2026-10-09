@@ -51,7 +51,9 @@ Write it to `jam/takes/<NN>-<short-name>.json` (count up from the takes already 
   then stops.
 - `sound` is optional: `lead` (Singing Lead, the default) or any daisy preset id (`velvet`,
   `sunday`, `honey`, `cassette`, `crunch`). `crunch` (Crunch Guitar) is an overdriven electric
-  guitar: the one to use when the user asks for guitar, rock or metal.
+  guitar: the one to use when the user asks for guitar, rock or metal. (`chug`, Metal Chug, is a
+  rhythm sound for the user's loops, not for solos: it plays power chords, so the chart shows
+  `E5`-style chords with no third. Take major or minor from the key and the riff.)
 
 ## 3. Hand it over
 
