@@ -171,12 +171,12 @@ export class Stage {
 
   fx() {
     const e = this.src.engine;
-    const v = { ...e.fx.values, ...e.colour.values }; // shared room + the current sound's pedals
+    const v = e.sound.values, m = e.sound.macros; // the live sound's pedals and room
     return {
-      exposure: 0.45 + e.macros.brightness * 1.1,
+      exposure: 0.45 + m.brightness * 1.1,
       split: v.chorus,
       heat: v.drive,
-      resonance: e.macros.resonance,
+      resonance: m.resonance,
       echo: v.echo,
       pulse: this.pulse,
       shimmer: this.shimmer * 0.8,

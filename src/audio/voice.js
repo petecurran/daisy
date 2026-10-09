@@ -3,14 +3,19 @@
 const mtof = (n) => 440 * Math.pow(2, (n - 69) / 12);
 
 export class Voice {
-  constructor(engine, preset, note, velocity, when) {
+  // `expressive`: wire it to pitch bend and vibrato (live notes in notes mode).
+  constructor(engine, sound, note, velocity, when, expressive) {
     const ctx = engine.ctx;
+    const preset = sound.preset;
     this.ctx = ctx;
     this.engine = engine;
+    this.sound = sound;
     this.preset = preset;
+    this.expressive = expressive;
     this.note = note;
     this.sources = [];
     this.pitchParams = []; // every AudioParam (cents) that pitch bend / vibrato / drift should move
+    this.detunes = new Map(); // pitch param -> its oscillator's own fixed detune (cents)
 
     const t = Math.max(when ?? 0, ctx.currentTime);
     const vel = velocity / 127;
@@ -19,7 +24,7 @@ export class Voice {
 
     this.out = ctx.createGain();
     this.out.gain.value = 0;
-    this.out.connect(engine.chainFor(preset).input);
+    this.out.connect(sound.strip.input);
     this.end = null; // audio time this voice falls silent (set on release)
 
     // Two cascaded lowpasses = a smooth 24dB slope; resonance only on the second.
@@ -28,7 +33,7 @@ export class Voice {
     this.f2 = ctx.createBiquadFilter();
     this.f1.type = this.f2.type = 'lowpass';
     this.f1.Q.value = 0.6;
-    this.f2.Q.value = f.q * engine.macrosFor(preset).resonance * 2;
+    this.f2.Q.value = f.q * sound.macros.resonance * 2;
     this.baseCutoff = f.cutoff * Math.pow(freq / 261.6, f.keytrack);
     this.applyCutoff(t, true);
     this.f1.connect(this.f2);
@@ -65,12 +70,15 @@ export class Voice {
     else this.buildSubtractive(freq, t);
 
     for (const p of this.pitchParams) {
-      p.value = drift;
-      engine.bend.connect(p);
-      engine.vibrato.connect(p);
+      const base = drift + (this.detunes.get(p) ?? 0);
+      p.value = base;
+      if (expressive) {
+        engine.bend.connect(p);
+        engine.vibrato.connect(p);
+      }
       if (preset.pitchEnv) {
-        p.setValueAtTime(drift + preset.pitchEnv.cents, t);
-        p.setTargetAtTime(drift, t, preset.pitchEnv.time / 3);
+        p.setValueAtTime(base + preset.pitchEnv.cents, t);
+        p.setTargetAtTime(base, t, preset.pitchEnv.time / 3);
       }
     }
 
@@ -92,24 +100,17 @@ export class Voice {
       const g = ctx.createGain();
       g.gain.value = o.level;
       osc.connect(g).connect(this.f1);
-      const det = ctx.createConstantSource(); // per-osc static detune, summed with pitch params
-      det.offset.value = o.detune;
-      det.connect(osc.detune);
-      det.start(t);
       osc.start(t);
-      this.sources.push(osc, det);
+      this.sources.push(osc);
       this.pitchParams.push(osc.detune);
+      this.detunes.set(osc.detune, o.detune); // folded into the param's own value, no extra node
     }
     if (p.noise) {
-      const n = ctx.createBufferSource();
-      n.buffer = this.engine.noiseBuffer;
-      n.loop = true;
-      n.loopStart = Math.random();
-      const g = ctx.createGain();
-      g.gain.value = p.noise;
-      n.connect(g).connect(this.f1);
-      n.start(t, Math.random());
-      this.sources.push(n);
+      // A tap off the shared noise source: a whole noise player per note was a big part of a note's
+      // cost on the audio thread.
+      this.breath = ctx.createGain();
+      this.breath.gain.value = p.noise;
+      this.engine.noise.connect(this.breath).connect(this.f1);
     }
   }
 
@@ -144,7 +145,7 @@ export class Voice {
   }
 
   applyCutoff(t = this.ctx.currentTime, immediate = false) {
-    const hz = Math.min(18000, this.baseCutoff * this.engine.brightnessMult(this.preset));
+    const hz = Math.min(18000, this.baseCutoff * this.sound.brightnessMult);
     if (immediate) {
       this.f1.frequency.value = this.f2.frequency.value = hz;
     } else {
@@ -154,10 +155,19 @@ export class Voice {
   }
 
   applyResonance(t = this.ctx.currentTime) {
-    this.f2.Q.setTargetAtTime(this.preset.filter.q * this.engine.macrosFor(this.preset).resonance * 2, t, 0.02);
+    this.f2.Q.setTargetAtTime(this.preset.filter.q * this.sound.macros.resonance * 2, t, 0.02);
   }
 
+  // The brightness/resonance knobs moved.
+  retune() {
+    this.applyCutoff();
+    this.applyResonance();
+  }
+
+  // Once released (or stolen) a voice is on its way out: a second release must not stretch it
+  // out again, or stolen notes come back to life, silent but still costing the audio thread.
   release(extra = 1, at) {
+    if (this.done) return;
     const t = Math.max(at ?? 0, this.ctx.currentTime);
     const r = this.releaseTime * extra;
     this.out.gain.cancelAndHoldAtTime(t);
@@ -170,19 +180,34 @@ export class Voice {
     const end = t + r * 1.6 + 0.05;
     this.end = end;
     for (const s of this.sources) s.stop(end);
-    setTimeout(() => this.out.disconnect(), (end - this.ctx.currentTime) * 1000 + 100);
+    setTimeout(() => this.detach(), (end - this.ctx.currentTime) * 1000 + 100);
     this.done = true;
   }
 
   kill() {
     // Fast fade for voice stealing.
+    if (this.killed) return;
     const t = this.ctx.currentTime;
     this.out.gain.cancelAndHoldAtTime(t);
-    this.out.gain.setTargetAtTime(0, t, 0.01);
-    for (const s of this.sources) s.stop(t + 0.08);
-    setTimeout(() => this.out.disconnect(), 200);
-    this.end = t + 0.08;
+    this.out.gain.setTargetAtTime(0, t, 0.006); // -60dB by the time it stops: no click
+    for (const s of this.sources) s.stop(t + 0.04);
+    setTimeout(() => this.detach(), 120);
+    this.end = t + 0.04;
     this.killed = true;
     this.done = true;
+  }
+
+  // Unplug once silent. The shared pitch bend / vibrato sources have to let go of it too, or every
+  // note ever played stays wired to them (and alive) for the rest of the session.
+  detach() {
+    if (this.detached) return;
+    this.detached = true;
+    this.out.disconnect();
+    if (this.breath) this.engine.noise.disconnect(this.breath);
+    if (!this.expressive) return;
+    for (const p of this.pitchParams) {
+      this.engine.bend.disconnect(p);
+      this.engine.vibrato.disconnect(p);
+    }
   }
 }

@@ -8,7 +8,11 @@
 //
 // It records the notes the synth actually plays (after the chord engine): starts snapped to 16th
 // steps, lengths kept exactly as played (so short arp notes stay crisp).
-// Each layer remembers the sound it was played with, and can be switched later.
+//
+// Each layer plays through a sound of its own (engine.loopSound: preset, knob settings and channel
+// strip). While a take is being recorded its sound follows the live sound and knobs; once it's
+// locked in, nothing you do to the live sound touches it. The whole loop has one level (the Loop
+// knob), so it can be pulled down while you play a new layer over it.
 
 const DOUBLE_TAP_MS = 350;
 const HOLD_MS = 650;
@@ -69,7 +73,7 @@ export class Looper {
       case 'armed':
       case 'recording': return this.close();
       case 'playing': return this.cueOverdub();
-      case 'cued': this.current = null; this.setState('playing'); return 'cancel';
+      case 'cued': this.dropTake(); this.setState('playing'); return 'cancel';
       case 'overdub': return this.endOverdub();
       case 'stopped': return this.resume();
     }
@@ -77,7 +81,7 @@ export class Looper {
 
   // Second tap undoes whatever the first tap just started, then stops.
   doubleTap() {
-    if (this.state === 'overdub' || this.state === 'cued') this.current = null;
+    if (this.state === 'overdub' || this.state === 'cued') this.dropTake();
     if (this.state === 'armed' || this.state === 'recording') return this.clear();
     this.stop();
   }
@@ -91,13 +95,12 @@ export class Looper {
 
   arm() {
     if (!this.seq.playing) {
-      this.seq.start(); // the first bar is a count-in
-      this.start = this.seq.sig.barSteps;
+      this.start = this.resumeBar() + this.seq.sig.barSteps; // the first bar is a count-in
+      this.seq.start();
     } else {
       this.start = this.seq.nextBarStep();
     }
-    this.current = this.newLayer();
-    this.pending.clear();
+    this.newTake();
     this.setState('armed');
     return 'arm';
   }
@@ -119,8 +122,7 @@ export class Looper {
 
   // A new layer waits for the top of the loop, like the first take waits for the bar.
   cueOverdub() {
-    this.current = this.newLayer();
-    this.pending.clear();
+    this.newTake();
     this.layerStart = this.start + Math.ceil((this.seq.step - this.start) / this.length) * this.length;
     this.setState('cued');
     return 'cue';
@@ -135,8 +137,8 @@ export class Looper {
 
   resume() {
     if (!this.seq.playing) {
+      this.start = this.resumeBar();
       this.seq.start();
-      this.start = 0;
     } else {
       this.start = this.seq.nextBarStep();
     }
@@ -144,45 +146,68 @@ export class Looper {
     return 'resume';
   }
 
+  // The first bar line the transport will reach once started: the top if it's stopped, the next
+  // bar if it's paused part-way through one (it carries on from where it was paused).
+  resumeBar() {
+    const bar = this.seq.sig.barSteps;
+    return this.seq.paused ? Math.ceil(this.seq.step / bar) * bar : 0;
+  }
+
   stop() {
-    this.current = null;
-    this.pending.clear();
+    this.dropTake();
     this.engine.stopLoopVoices();
     this.setState(this.hasLoop ? 'stopped' : 'empty');
   }
 
   undo() {
     if (this.state === 'overdub' || this.state === 'cued') {
-      this.current = null;
-      this.pending.clear();
+      this.dropTake();
       this.setState('playing');
     } else {
-      this.layers.pop();
-      this.engine.stopLoopVoices();
+      const last = this.layers.pop();
+      if (last) this.engine.dropSound(last.sound);
       if (!this.layers.length) return this.clear();
       this.setState(this.state);
     }
   }
 
   clear() {
+    this.dropTake();
+    for (const l of this.layers) this.engine.dropSound(l.sound);
     this.layers = [];
-    this.current = null;
     this.length = 0;
-    this.pending.clear();
     this.engine.stopLoopVoices();
+    this.engine.setLoopLevel(1); // a fresh loop starts at full level
     this.setState('empty');
   }
 
   // ---------- layers ----------
 
-  newLayer() {
-    return { id: nextId++, preset: this.engine.preset, events: [], muted: false, byStep: new Map() };
+  // A take: the layer being recorded. Its sound follows the live one until it's locked in.
+  newTake() {
+    this.dropTake();
+    const sound = this.engine.loopSound();
+    this.engine.follow(sound);
+    this.current = {
+      id: nextId++, sound, events: [], muted: false, byStep: new Map(),
+      get preset() { return this.sound.preset; },
+    };
   }
 
+  // Throw the take away (cancelled, undone, or stopped before it was kept).
+  dropTake() {
+    if (this.current) this.engine.dropSound(this.current.sound);
+    this.current = null;
+    this.pending.clear();
+  }
+
+  // Lock the take in as a layer: from now on its sound is fixed.
   commit() {
     const layer = this.current;
     this.current = null;
-    if (!layer || !layer.events.length) return;
+    if (!layer) return;
+    this.engine.follow(null);
+    if (!layer.events.length) return this.engine.dropSound(layer.sound);
     this.index(layer);
     this.layers.push(layer);
   }
@@ -195,20 +220,29 @@ export class Looper {
     }
   }
 
+  // Re-voice a layer with another sound (as that sound is set up live right now).
   setLayerPreset(id, preset) {
     const l = this.layers.find((l) => l.id === id);
-    if (l) l.preset = preset;
+    if (!l) return;
+    this.engine.dropSound(l.sound);
+    l.sound = this.engine.loopSound(this.engine.liveSound(preset));
+    if (l.muted) this.engine.setMuted(l.sound, true);
     this.onState?.();
   }
 
   toggleMute(id) {
     const l = this.layers.find((l) => l.id === id);
-    if (l) l.muted = !l.muted;
+    if (!l) return;
+    l.muted = !l.muted;
+    this.engine.setMuted(l.sound, l.muted); // silences its notes that are already sounding too
     this.onState?.();
   }
 
   removeLayer(id) {
-    this.layers = this.layers.filter((l) => l.id !== id);
+    const l = this.layers.find((l) => l.id === id);
+    if (!l) return;
+    this.engine.dropSound(l.sound);
+    this.layers = this.layers.filter((x) => x !== l);
     if (!this.layers.length && this.state !== 'overdub') return this.clear();
     this.onState?.();
   }
@@ -320,7 +354,7 @@ export class Looper {
     for (const layer of layers) {
       if (layer.muted) continue;
       for (const e of layer.byStep.get(pos) || []) {
-        this.engine.playNote(e.note, e.vel, layer.preset, t, Math.max(0.02, e.len * stepDur - 0.01));
+        this.engine.playNote(e.note, e.vel, layer.sound, t, Math.max(0.02, e.len * stepDur - 0.01));
       }
     }
   }

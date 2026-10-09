@@ -82,6 +82,7 @@ export class Deck {
       pads.appendChild(el);
     }
     this.padEls = [...pads.children].sort((a, b) => a.dataset.i - b.dataset.i);
+    this.padParts = this.padEls.map((el) => ({ icon: el.querySelector('.pad-icon'), label: el.querySelector('b'), sub: el.querySelector('small') }));
 
     const knobs = root.querySelector('.knobs');
     for (let i = 0; i < 8; i++) {
@@ -92,6 +93,11 @@ export class Deck {
       knobs.appendChild(el);
     }
     this.knobEls = [...knobs.children];
+    this.knobParts = this.knobEls.map((el) => ({ icon: el.querySelector('.knob-icon'), label: el.querySelector('.knob-label') }));
+
+    // Looked up once: update() runs every frame.
+    const q = (sel) => root.querySelector(sel);
+    this.els = { chip: q('.sound-chip'), key: q('.key-chip'), mode: q('.mode-chip'), joy: q('.joy'), dot: q('.joy-dot') };
 
     // 25 keys as a light strip; the black keys are shorter, so the keyboard's shape is still there.
     const strip = root.querySelector('.strip');
@@ -134,19 +140,20 @@ export class Deck {
     const key = chords ? `${NOTE_NAMES[chords.key.tonic]} ${chords.key.mode === 'major' ? 'maj' : 'min'}` : 'Key';
     const info = { ...this.src, mode, key: `Key ${key}`, sustain: extra.sustain };
 
-    const chip = this.root.querySelector('.sound-chip');
+    const { chip, dot } = this.els;
     this.set('sound', chip.lastElementChild, 'text', preset.name);
     this.set('soundc', chip, '--c', preset.color);
-    this.set('key', this.root.querySelector('.key-chip'), 'text', key);
-    this.set('mode', this.root.querySelector('.mode-chip'), 'text', mode === 'chords' ? 'Chords' : 'Notes');
-    this.set('modeon', this.root.querySelector('.mode-chip'), '.notes', mode === 'notes');
+    this.set('key', this.els.key, 'text', key);
+    this.set('mode', this.els.mode, 'text', mode === 'chords' ? 'Chords' : 'Notes');
+    this.set('modeon', this.els.mode, '.notes', mode === 'notes');
 
     const suggest = this.suggestedPad();
     this.padEls.forEach((el, i) => {
       const p = padInfo(page, i, info);
-      this.set(`pi${i}`, el.querySelector('.pad-icon'), 'html', svg(p.icon));
-      this.set(`pl${i}`, el.querySelector('b'), 'text', p.label);
-      this.set(`ps${i}`, el.querySelector('small'), 'text', p.sub);
+      const parts = this.padParts[i];
+      this.set(`pi${i}`, parts.icon, 'html', svg(p.icon));
+      this.set(`pl${i}`, parts.label, 'text', p.label);
+      this.set(`ps${i}`, parts.sub, 'text', p.sub);
       this.set(`pst${i}`, el, 'data-state', p.state ?? '');
       this.set(`psg${i}`, el, '.suggest', i === suggest);
       el.classList.toggle('hit', now - (this.hits.get(i) ?? -1e9) < 180);
@@ -154,16 +161,15 @@ export class Deck {
 
     const knobs = this.src.knobs();
     this.knobEls.forEach((el, i) => {
-      this.set(`ki${i}${page}`, el.querySelector('.knob-icon'), 'html', svg(KNOB_ICONS[page][i]));
-      this.set(`kl${i}`, el.querySelector('.knob-label'), 'text', KNOB_LABELS[page][i]);
+      this.set(`ki${i}${page}`, this.knobParts[i].icon, 'html', svg(KNOB_ICONS[page][i]));
+      this.set(`kl${i}`, this.knobParts[i].label, 'text', KNOB_LABELS[page][i]);
       this.set(`kd${i}`, el, '--v', knobs[i].get().toFixed(3));
     });
 
     const x = joy?.x ?? 0, y = joy ? joy.up - joy.down : 0;
-    const dot = this.root.querySelector('.joy-dot');
     this.set('jx', dot, 'cx', (x * 28).toFixed(1));
     this.set('jy', dot, 'cy', (-y * 28).toFixed(1));
-    this.set('jzon', this.root.querySelector('.joy'), '.on', (joy?.zone ?? 'C') !== 'C');
+    this.set('jzon', this.els.joy, '.on', (joy?.zone ?? 'C') !== 'C');
   }
 
   // Light the keys that are sounding, in the chord's colour. In notes mode the keys that belong to
@@ -177,8 +183,8 @@ export class Deck {
       this.set(`in${n}`, el, '.inkey', scale.includes(n % 12));
       this.set(`home${n}`, el, '.home', guide && n % 12 === chords.key.tonic);
       const on = lit.has(n) || (n === 24 && lit.has(0));
-      el.classList.toggle('lit', on);
-      if (on) el.style.setProperty('--c', `rgb(${color})`);
+      this.set(`lit${n}`, el, '.lit', on);
+      if (on) this.set(`c${n}`, el, '--c', `rgb(${color})`); // only touch the style when it changes
     }
   }
 }

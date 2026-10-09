@@ -1,28 +1,31 @@
-import { ColourChain, FXChain, makeNoiseBuffer } from './fx.js';
+import { FXChain, makeNoiseBuffer } from './fx.js';
+import { Sound } from './sound.js';
 import { Voice } from './voice.js';
 import { DrumKit } from '../drums/kit.js';
 import { bus } from '../bus.js';
 
-// Counts notes still fading out too: released notes keep sounding through their release tail, and
-// hammering a key used to pile those up until the audio engine choked.
+// Every note still sounding, live or looped, counts, including ones fading out after release.
+// Past this the oldest note is stolen, so however many keys go down at once the audio thread
+// never has more than this to render.
 const MAX_VOICES = 32;
 
 export class Engine {
   constructor() {
     this.ctx = new AudioContext({ latencyHint: 'interactive' });
     this.noiseBuffer = makeNoiseBuffer(this.ctx);
+    // One noise source shared by every voice's breath and every strip's tape hiss.
+    this.noise = this.ctx.createBufferSource();
+    this.noise.buffer = this.noiseBuffer;
+    this.noise.loop = true;
+    this.noise.start();
     this.fx = new FXChain(this.ctx);
-    this.voiceBus = this.ctx.createGain(); // all sounds' colour chains meet here (the pump ducks it)
-    this.voiceBus.connect(this.fx.post);
-    this.chains = new Map(); // preset id -> ColourChain
-    this.presetMacros = new Map(); // preset id -> { brightness, resonance, release }
 
-    // Drums skip the synth's chorus/wobble and go straight to the master, with their own room send.
+    // Drums skip the synth strips and go straight to the master, with their own room send.
     this.drums = new DrumKit(this.ctx, this.noiseBuffer, this.fx.master, this.fx.reverb);
     this.pump = 0;
     this.drums.onKick = (t, v) => this.duck(t, v);
 
-    // Shared pitch modulation, patched into every voice's detune params.
+    // Pitch bend and vibrato (notes mode only), patched into the live voices' detune params.
     this.bend = this.ctx.createConstantSource();
     this.bend.offset.value = 0;
     this.bend.start();
@@ -32,99 +35,159 @@ export class Engine {
     this.vibrato.gain.value = 0;
     vibLfo.connect(this.vibrato);
     vibLfo.start();
+    this.expressive = false;
+
+    this.live = new Map(); // preset id -> its live Sound
+    this.sound = null; // the live sound the keys play
+    this.room = null; // echo/reverb: shared by all the live sounds
+    this.loopSounds = new Set(); // loop layers' sounds (all at the loop level)
+    this.loopLevel = 1;
+    this.follower = null; // the layer being recorded: follows the knobs until it's locked in
 
     this.voices = new Map(); // note -> Voice (live playing)
-    this.loopVoices = []; // voices started by the looper
-    this.all = [];
-    this.preset = null;
+    this.all = []; // every voice still sounding, oldest first
   }
 
-  // Each sound keeps its own colour pedals and tone settings, so loop layers keep their sound.
-  chainFor(preset) {
-    let c = this.chains.get(preset.id);
-    if (!c) {
-      c = new ColourChain(this.ctx, this.noiseBuffer, this.voiceBus);
-      c.set(preset.fx);
-      this.chains.set(preset.id, c);
+  get preset() { return this.sound?.preset; }
+
+  liveSound(preset) {
+    let s = this.live.get(preset.id);
+    if (!s) {
+      // The room starts from the first sound's taste, then it's yours.
+      this.room ??= { echo: preset.fx.echo, reverb: preset.fx.reverb };
+      s = new Sound(this, preset, { values: { ...preset.fx, ...this.room } });
+      this.live.set(preset.id, s);
     }
-    return c;
-  }
-
-  macrosFor(preset) {
-    let m = this.presetMacros.get(preset.id);
-    if (!m) this.presetMacros.set(preset.id, (m = { brightness: 0.5, resonance: 0.5, release: 0.5 }));
-    return m;
-  }
-
-  get macros() { return this.macrosFor(this.preset); }
-  get colour() { return this.chainFor(this.preset); }
-
-  // 0..1 knob -> x0.2 .. x5, with 0.5 = preset's own sound.
-  brightnessMult(preset = this.preset) {
-    return Math.pow(5, (this.macrosFor(preset).brightness - 0.5) * 2);
+    return s;
   }
 
   setPreset(preset) {
-    this.preset = preset;
-    this.chainFor(preset);
-    // The room (echo/reverb) is shared; it starts from the first sound's taste, then it's yours.
-    if (!this.roomSet) {
-      this.fx.set({ echo: preset.fx.echo, reverb: preset.fx.reverb });
-      this.roomSet = true;
-    }
+    this.sound = this.liveSound(preset);
+    this.syncFollower();
   }
 
-  // Make room for one more voice: drop finished ones, then steal the oldest fading one (or oldest).
-  makeRoom() {
+  // Knobs: tone macros and colour pedals belong to the current sound; echo/reverb to the room.
+  setMacro(name, value) {
+    this.sound.macros[name] = value;
+    this.retune(this.sound);
+    this.syncFollower();
+  }
+
+  setPedal(key, value) {
+    if (key === 'echo' || key === 'reverb') {
+      this.room[key] = value;
+      for (const s of this.live.values()) s.strip.set({ [key]: value });
+    } else {
+      this.sound.strip.set({ [key]: value });
+    }
+    this.syncFollower();
+  }
+
+  // Notes already sounding in this sound pick up its brightness/resonance.
+  retune(sound) {
+    for (const v of this.all) if (v.sound === sound && !v.killed) v.retune();
+  }
+
+  // ---------- loop layers' sounds ----------
+
+  loopSound(from = this.sound) {
+    const s = from.copy(this.loopLevel);
+    this.loopSounds.add(s);
+    return s;
+  }
+
+  follow(sound) {
+    this.follower = sound;
+    this.syncFollower();
+  }
+
+  syncFollower() {
+    if (!this.follower || !this.sound) return;
+    this.follower.follow(this.sound);
+    this.retune(this.follower);
+  }
+
+  // A layer is gone: silence it and unplug its strip once the notes have faded.
+  dropSound(sound) {
+    if (this.follower === sound) this.follower = null;
+    this.loopSounds.delete(sound);
+    for (const v of this.all) if (v.sound === sound) v.kill();
+    setTimeout(() => sound.strip.dispose(), 300);
+  }
+
+  setLoopLevel(v) {
+    this.loopLevel = v;
+    for (const s of this.loopSounds) if (!s.muted) s.strip.fade(v);
+  }
+
+  setMuted(sound, muted) {
+    sound.muted = muted;
+    sound.strip.fade(muted ? 0 : this.loopLevel, 0.02);
+  }
+
+  // ---------- notes ----------
+
+  // Make room for one more voice: forget finished ones, then steal: same kind (live/loop) first,
+  // a fading one before a held one, oldest first.
+  makeRoom(loop) {
     const now = this.ctx.currentTime;
     this.all = this.all.filter((v) => v.end == null || v.end > now);
-    while (this.all.length >= MAX_VOICES) {
-      const i = this.all.findIndex((v) => v.end != null);
-      this.all.splice(i >= 0 ? i : 0, 1)[0].kill();
+    let count = 0;
+    for (const v of this.all) if (!v.killed) count++;
+    while (count >= MAX_VOICES) {
+      const pick = (fn) => this.all.find((v) => !v.killed && fn(v));
+      const v = pick((v) => v.loop === loop && v.done) ?? pick((v) => v.loop === loop) ?? pick((v) => v.done) ?? pick(() => true);
+      v.kill();
+      count--;
     }
   }
 
   // `strike` groups the notes of one strummed chord (so the looper keeps them together).
   noteOn(note, velocity = 100, strike) {
-    if (!this.preset) return;
-    const existing = this.voices.get(note);
-    if (existing) existing.release(0.3);
-    this.makeRoom();
-    const v = new Voice(this, this.preset, note, velocity);
+    if (!this.sound) return;
+    this.voices.get(note)?.release(0.3);
+    this.makeRoom(false);
+    const v = new Voice(this, this.sound, note, velocity, null, this.expressive);
     this.voices.set(note, v);
     this.all.push(v);
     this.onLiveOn?.(note, velocity, strike);
-    bus.emit('note', { note, vel: velocity, preset: this.preset, loop: false });
-  }
-
-  // A note with a known start and length, in any preset: used by looper playback.
-  playNote(note, velocity, preset, start, duration) {
-    this.loopVoices = this.loopVoices.filter((v) => v.end > this.ctx.currentTime);
-    this.makeRoom();
-    const v = new Voice(this, preset, note, velocity, start);
-    v.release(1, start + duration);
-    this.all.push(v);
-    this.loopVoices.push(v);
-    bus.emitAt(this.ctx, start, 'note', { note, vel: velocity, preset, loop: true });
-    bus.emitAt(this.ctx, start + duration, 'noteoff', { note, loop: true });
-  }
-
-  stopLoopVoices() {
-    for (const v of this.loopVoices) v.kill();
-    this.loopVoices = [];
+    bus.emit('note', { note, vel: velocity, preset: this.sound.preset, loop: false });
   }
 
   noteOff(note) {
     const v = this.voices.get(note);
     if (!v) return;
     this.voices.delete(note);
-    v.release(Math.pow(4, (this.macrosFor(v.preset).release - 0.5) * 2));
+    v.release(v.sound.releaseMult);
     this.onLiveOff?.(note);
     bus.emit('noteoff', { note });
   }
 
   allOff() {
     for (const note of [...this.voices.keys()]) this.noteOff(note);
+  }
+
+  // A note with a known start and length, in a loop layer's sound: looper playback.
+  playNote(note, velocity, sound, start, duration) {
+    this.makeRoom(true);
+    const v = new Voice(this, sound, note, velocity, start, false);
+    v.loop = true;
+    v.release(sound.releaseMult, start + duration);
+    this.all.push(v);
+    bus.emitAt(this.ctx, start, 'note', { note, vel: velocity, preset: sound.preset, loop: true });
+    bus.emitAt(this.ctx, start + duration, 'noteoff', { note, loop: true });
+  }
+
+  stopLoopVoices() {
+    for (const v of this.all) if (v.loop) v.kill();
+  }
+
+  // Notes mode bends and wobbles the live notes; chords mode uses the joystick for chords, so its
+  // notes skip that wiring (it costs the audio thread on every oscillator).
+  setExpressive(on) {
+    this.expressive = on;
+    this.pitchBend(0);
+    this.modWheel(0);
   }
 
   // -1..1 -> +/- 2 semitones
@@ -137,20 +200,14 @@ export class Engine {
     this.vibrato.gain.setTargetAtTime(amount * 40, this.ctx.currentTime, 0.02);
   }
 
-  setMacro(name, value) {
-    this.macros[name] = value;
-    const live = this.all.filter((v) => v.preset === this.preset && !v.killed);
-    if (name === 'brightness') live.forEach((v) => v.applyCutoff());
-    if (name === 'resonance') live.forEach((v) => v.applyResonance());
-  }
-
   // Sidechain-style "pump": each kick briefly ducks the synth, which then breathes back in.
   duck(t, v) {
     if (!this.pump) return;
-    const g = this.voiceBus.gain;
-    g.cancelScheduledValues(t);
-    g.setValueAtTime(1 - this.pump * 0.75 * v, t + 0.005);
-    g.setTargetAtTime(1, t + 0.02, 0.09);
+    for (const { gain: g } of this.fx.synthInputs) {
+      g.cancelScheduledValues(t);
+      g.setValueAtTime(1 - this.pump * 0.75 * v, t + 0.005);
+      g.setTargetAtTime(1, t + 0.02, 0.09);
+    }
   }
 
   // Tape echo locked to the drum tempo (a dotted eighth).

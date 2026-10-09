@@ -16,6 +16,7 @@ uniform float radii[MAX];     // leading edge of each chord's band (px), newest 
 uniform vec3 colors[MAX];
 uniform float alive[MAX];     // 1 while held, fading after release
 uniform float seeds[MAX];
+uniform vec4 phase[MAX];      // cos/sin of each ring's two wobble phases (worked out on the CPU)
 uniform float sparkle[MAX];   // extra glitter for colourful chords (9ths etc.)
 uniform vec2 origin, res;
 uniform float maxR;
@@ -29,61 +30,95 @@ float hash(vec3 p) {
   return fract((p.x + p.y) * p.z);
 }
 
-// The wave's edge, bent by tape wobble.
-float shapeOffset(float ang, float seed) {
-  return sin(ang * 6.0 + time * 2.3 + seed) * wobble * 22.0
-       + sin(ang * 13.0 - time * 1.7 + seed * 2.0) * wobble * 7.0;
+// The wave's edge, bent by tape wobble: sin(6 ang + phase1) and sin(13 ang + phase2), opened up
+// with the angle-sum rule so the per-pixel part (a = sin/cos of 6 ang and 13 ang) is worked out
+// once per pixel and the per-ring part (w = cos/sin of the phases) once per frame. The loop over
+// the rings then has no trig in it at all.
+float shapeOffset(vec4 w, vec4 a) {
+  return (a.x * w.x + a.y * w.y) * wobble * 22.0 + (a.z * w.z + a.w * w.w) * wobble * 7.0;
 }
 
-vec3 shade(float r, float ang) {
+// The kick ripple dents every wave's edge the same amount at a given radius.
+float dent(float r) {
+  float x = (r - ripple) / 40.0;
+  return rippleAmp * 16.0 * exp(-x * x);
+}
+
+// Colour of ring i's band at radius r, whose (bent) edge is at radius edge.
+vec3 paint(int i, float r, float ang, float edge) {
+  vec3 col = colors[i] * (0.4 + 0.6 * alive[i]);
+  // Dissolve: dense and solid for most of the screen, breaking into dust towards the edges.
+  float age = smoothstep(0.5, 1.0, r / maxR);
+  float depth = edge - r;                  // px behind the leading edge: travels with the wave
+
+  // The wave's own pixel lattice: rows in depth, a fixed number of columns around the arc, so
+  // the columns fan apart as the wave grows.
+  float cols = 300.0; // around the full circle
+  float arc = max(r, 1.0) * 2.0 * PI / cols;
+  float rowF = depth / cell, colF = (ang + PI) / (2.0 * PI) * cols;
+  vec2 id = floor(vec2(rowF, colF));
+  float h = hash(vec3(id, seeds[i]));
+  float h2 = hash(vec3(id.yx, seeds[i] + 7.0));
+  // Scatter: with age (and snare hits) each pixel drifts off its spot and some drop out.
+  float drift = (age * 0.9 + scatter) * cell;
+  vec2 local = vec2(fract(rowF) * cell, fract(colF) * arc);
+  vec2 centre = vec2(cell * 0.5 + (h - 0.5) * drift, arc * 0.5 + (h2 - 0.5) * drift * 1.5);
+  float size = cell * 0.42;
+  float inside = step(abs(local.x - centre.x), size) * step(abs(local.y - centre.y), size);
+  float survive = step(age * 1.05, h * 0.95 + 0.05);
+  float twinkle = hash(vec3(id, floor(time * 12.0) + seeds[i]));
+  float glow = 0.75 + 0.35 * h + (shimmer + sparkle[i]) * (twinkle - 0.5) * 0.9;
+  vec3 c = col * inside * survive * glow;
+
+  // A soft wash of the band's colour behind its pixels, so the screen reads as colour.
+  c += col * 0.16 * (1.0 - age * 0.8);
+  // Bright leading edge; resonance makes it ring, with faint lines just behind it.
+  c += col * (0.7 + ringing * 0.8) * smoothstep(cell * (1.6 - ringing * 0.8), 0.0, depth);
+  if (ringing > 0.0) {
+    float rg = cell * 1.3;
+    c += col * ringing * 0.5 * (smoothstep(1.2, 0.0, abs(depth - rg * 1.5)) + 0.5 * smoothstep(1.2, 0.0, abs(depth - rg * 3.0)));
+  }
+  // Echo: ghost edges trailing behind it.
+  if (echo > 0.0) {
+    float k = depth / echoGap;
+    float ghost = smoothstep(0.08, 0.0, abs(fract(k) - 0.02)) * step(1.0, k) * step(k, 4.0);
+    c += col * ghost * echo * pow(0.6, floor(k));
+  }
+  // Kick ripple glow.
+  float x = (r - ripple) / 26.0;
+  c += c * rippleAmp * 1.3 * exp(-x * x);
+  return c;
+}
+
+// Newest first: the first wave whose edge is still beyond r is the band r sits in.
+vec3 shade(float r, float ang, vec4 a) {
+  float d = dent(r);
   for (int i = 0; i < MAX; i++) {
     if (i >= count) break;
-    float edge = radii[i] + shapeOffset(ang, seeds[i]) - rippleAmp * 16.0 * exp(-pow((r - ripple) / 40.0, 2.0));
-    if (r >= edge) continue;
-
-    vec3 col = colors[i] * (0.4 + 0.6 * alive[i]);
-    // Dissolve: dense and solid for most of the screen, breaking into dust towards the edges.
-    float age = smoothstep(0.5, 1.0, r / maxR);
-    float depth = edge - r;                  // px behind the leading edge: travels with the wave
-
-    // The wave's own pixel lattice: rows in depth, a fixed number of columns around the arc, so
-    // the columns fan apart as the wave grows.
-    float cols = 300.0; // around the full circle
-    float arc = max(r, 1.0) * 2.0 * PI / cols;
-    float rowF = depth / cell, colF = (ang + PI) / (2.0 * PI) * cols;
-    vec2 id = floor(vec2(rowF, colF));
-    float h = hash(vec3(id, seeds[i]));
-    float h2 = hash(vec3(id.yx, seeds[i] + 7.0));
-    // Scatter: with age (and snare hits) each pixel drifts off its spot and some drop out.
-    float drift = (age * 0.9 + scatter) * cell;
-    vec2 local = vec2(fract(rowF) * cell, fract(colF) * arc);
-    vec2 centre = vec2(cell * 0.5 + (h - 0.5) * drift, arc * 0.5 + (h2 - 0.5) * drift * 1.5);
-    float size = cell * 0.42;
-    float inside = step(abs(local.x - centre.x), size) * step(abs(local.y - centre.y), size);
-    float survive = step(age * 1.05, h * 0.95 + 0.05);
-    float twinkle = hash(vec3(id, floor(time * 12.0) + seeds[i]));
-    float glow = 0.75 + 0.35 * h + (shimmer + sparkle[i]) * (twinkle - 0.5) * 0.9;
-    vec3 c = col * inside * survive * glow;
-
-    // A soft wash of the band's colour behind its pixels, so the screen reads as colour.
-    c += col * 0.16 * (1.0 - age * 0.8);
-    // Bright leading edge; resonance makes it ring, with faint lines just behind it.
-    c += col * (0.7 + ringing * 0.8) * smoothstep(cell * (1.6 - ringing * 0.8), 0.0, depth);
-    if (ringing > 0.0) {
-      float rg = cell * 1.3;
-      c += col * ringing * 0.5 * (smoothstep(1.2, 0.0, abs(depth - rg * 1.5)) + 0.5 * smoothstep(1.2, 0.0, abs(depth - rg * 3.0)));
-    }
-    // Echo: ghost edges trailing behind it.
-    if (echo > 0.0) {
-      float k = depth / echoGap;
-      float ghost = smoothstep(0.08, 0.0, abs(fract(k) - 0.02)) * step(1.0, k) * step(k, 4.0);
-      c += col * ghost * echo * pow(0.6, floor(k));
-    }
-    // Kick ripple glow.
-    c += c * rippleAmp * 1.3 * exp(-pow((r - ripple) / 26.0, 2.0));
-    return c;
+    float edge = radii[i] + shapeOffset(phase[i], a) - d;
+    if (r < edge) return paint(i, r, ang, edge);
   }
   return vec3(0.0);
+}
+
+// Chorus: each wave splits into a pink and a cyan copy. The three radii look for their bands in
+// one pass over the rings, so the edges are only worked out once.
+vec3 chorus(float r, float ang, vec4 a) {
+  float ra = r + split, rb = r - split;
+  float da = dent(ra), db = dent(rb), dm = dent(r);
+  int ia = -1, ib = -1, im = -1;
+  float ea = 0.0, eb = 0.0, em = 0.0;
+  for (int i = 0; i < MAX; i++) {
+    if (i >= count || (ia >= 0 && ib >= 0 && im >= 0)) break;
+    float base = radii[i] + shapeOffset(phase[i], a);
+    if (ia < 0 && ra < base - da) { ia = i; ea = base - da; }
+    if (ib < 0 && rb < base - db) { ib = i; eb = base - db; }
+    if (im < 0 && r < base - dm) { im = i; em = base - dm; }
+  }
+  vec3 A = ia < 0 ? vec3(0.0) : paint(ia, ra, ang, ea);
+  vec3 B = ib < 0 ? vec3(0.0) : paint(ib, rb, ang, eb);
+  vec3 M = im < 0 ? vec3(0.0) : paint(im, r, ang, em);
+  return M * 0.55 + A * vec3(1.0, 0.35, 0.75) * 0.5 + B * vec3(0.2, 0.8, 1.0) * 0.5;
 }
 
 void main() {
@@ -95,7 +130,7 @@ void main() {
   float B = 56.0 * dpr;
   vec2 block = floor(frag / B);
   float smear = smoothstep(0.75, 1.0, heat);
-  if (hash(vec3(block, floor(time * 5.0) + 11.0)) > 1.0 - smear * 0.14) {
+  if (smear > 0.0 && hash(vec3(block, floor(time * 5.0) + 11.0)) > 1.0 - smear * 0.14) {
     frag.x = block.x * B + fract(frag.x / B) * B * 0.06;
   }
 
@@ -106,22 +141,18 @@ void main() {
 
   // Drive: ring slips. Arcs of the waves jolt round the circle like a skipping record, more
   // often and further the harder you drive it, and on the kick.
-  float seg = floor((ang + PI) / (2.0 * PI) * 28.0);
-  float ringBand = floor(r / (46.0 * dpr));
-  float slot = floor(time * 7.0);
-  float slip = hash(vec3(seg, ringBand, slot));
-  if (slip > 1.0 - grunge * (0.3 + pulse * 0.25)) {
-    ang += (hash(vec3(ringBand, seg, slot + 5.0)) - 0.5) * 0.5 * grunge;
-    r += (hash(vec3(seg, slot, ringBand + 9.0)) - 0.5) * 20.0 * dpr * grunge;
+  if (grunge > 0.0) {
+    float seg = floor((ang + PI) / (2.0 * PI) * 28.0);
+    float ringBand = floor(r / (46.0 * dpr));
+    float slot = floor(time * 7.0);
+    float slip = hash(vec3(seg, ringBand, slot));
+    if (slip > 1.0 - grunge * (0.3 + pulse * 0.25)) {
+      ang += (hash(vec3(ringBand, seg, slot + 5.0)) - 0.5) * 0.5 * grunge;
+      r += (hash(vec3(seg, slot, ringBand + 9.0)) - 0.5) * 20.0 * dpr * grunge;
+    }
   }
-  vec3 c;
-  if (split > 0.5) {
-    // Chorus: each wave splits into a pink and a cyan copy.
-    vec3 a = shade(r + split, ang), b = shade(r - split, ang), m = shade(r, ang);
-    c = m * 0.55 + a * vec3(1.0, 0.35, 0.75) * 0.5 + b * vec3(0.2, 0.8, 1.0) * 0.5;
-  } else {
-    c = shade(r, ang);
-  }
+  vec4 a = vec4(sin(ang * 6.0), cos(ang * 6.0), sin(ang * 13.0), cos(ang * 13.0));
+  vec3 c = split > 0.5 ? chorus(r, ang, a) : shade(r, ang, a);
   c = vec3(1.0) - exp(-c * exposure * (1.0 + pulse * 0.3));
   float luma = dot(c, vec3(0.299, 0.587, 0.114));
   c = max(vec3(0.0), mix(vec3(luma), c, 1.15 + heat * 0.4));
@@ -154,6 +185,8 @@ export class Rings {
     this.ripple = 1e9;
     this.rippleAmp = 0;
     this.scatter = 0;
+    const f = (k) => new Float32Array(MAX * k); // reused every frame
+    this.buf = { radii: f(1), colors: f(3), alive: f(1), seeds: f(1), phase: f(4), sparkle: f(1) };
   }
 
   resize() {}
@@ -172,15 +205,21 @@ export class Rings {
     this.rippleAmp *= 0.15 ** dt;
     this.scatter *= 0.02 ** dt;
     const n = Math.min(MAX, rings.length);
-    const f = (k) => new Float32Array(MAX * k);
-    const radii = f(1), colors = f(3), alive = f(1), seeds = f(1), sparkle = f(1);
+    const { radii, colors, alive, seeds, phase, sparkle } = this.buf;
+    const time = now % 1000; // keep it small so float precision holds up
     for (let i = 0; i < n; i++) {
       const r = rings[i];
       radii[i] = r.radius;
-      colors.set(r.color.map((v) => (v / 255) * 1.25), i * 3);
+      for (let k = 0; k < 3; k++) colors[i * 3 + k] = (r.color[k] / 255) * 1.25;
       alive[i] = r.alive;
       seeds[i] = r.seed;
       sparkle[i] = r.sparkle;
+      // The wobble's two phases for this ring (see shapeOffset).
+      const p1 = time * 2.3 + r.seed, p2 = -time * 1.7 + r.seed * 2;
+      phase[i * 4] = Math.cos(p1);
+      phase[i * 4 + 1] = Math.sin(p1);
+      phase[i * 4 + 2] = Math.cos(p2);
+      phase[i * 4 + 3] = Math.sin(p2);
     }
     const u = this.p.use().u;
     const d = fx.dpr;
@@ -190,9 +229,10 @@ export class Rings {
     gl.uniform1fv(u.alive, alive);
     gl.uniform1f(u.maxR, fx.maxR);
     gl.uniform1fv(u.seeds, seeds);
+    gl.uniform4fv(u.phase, phase);
     gl.uniform1fv(u.sparkle, sparkle);
     gl.uniform2f(u.origin, origin[0], origin[1]);
-    gl.uniform1f(u.time, now % 1000); // keep it small so float precision holds up
+    gl.uniform1f(u.time, time);
     gl.uniform1f(u.pulse, fx.pulse);
     gl.uniform1f(u.ripple, this.ripple);
     gl.uniform1f(u.rippleAmp, this.rippleAmp);

@@ -13,6 +13,8 @@ import { FONT, hash, fontReady, rasterText } from './pixelText.js';
 const CREAM = [246, 231, 200];
 const STRIPES = [[224, 175, 104], [255, 158, 100], [200, 85, 61], [120, 52, 38]]; // after the chord colour
 const LEAVE_S = 0.6;
+const MAX_LEAVING = 3; // each card leaving paints hundreds of pixels a frame
+const rasters = new Map(); // "root|sup|cell" -> pixels: rasterising text is slow, chords repeat
 
 // Plain # and b like a chord chart (the font has no ♯ or ♭).
 const plain = (s) => s.replace('♭', 'b');
@@ -63,8 +65,13 @@ export class ChordLabel {
     const now = performance.now() / 1000;
     if (this.cur?.id === id && this.cur.releasedAt == null && !again) return;
     if (this.cur) {
-      this.cur.leftAt = now;
-      this.leaving.push(this.cur);
+      // A chord that's gone again before it could gather (keys being mashed) just vanishes, and
+      // only the last few play their exit.
+      if (now - this.cur.at > 0.1) {
+        this.cur.leftAt = now;
+        this.leaving.push(this.cur);
+      }
+      if (this.leaving.length > MAX_LEAVING) this.leaving.splice(0, this.leaving.length - MAX_LEAVING);
     }
     this.cur = { id, root, sup, color, at: now, releasedAt: null };
   }
@@ -78,10 +85,13 @@ export class ChordLabel {
   pixelate(card, cell, d) {
     card.cell = cell;
     card.fontReady = fontReady();
+    const key = `${card.root}|${card.sup}|${cell}|${d}`;
+    if (card.fontReady && rasters.has(key)) return (card.pixels = rasters.get(key));
     const root = rasterText(card.root, 116 * d, cell, 0, 0);
     const sup = card.sup ? rasterText(card.sup, 66 * d, Math.max(2, Math.round(cell * 0.6)), root.w + 4 * d, 10 * d) : { w: 0, px: [] };
     const half = (root.w + sup.w + 4 * d) / 2;
     card.pixels = [...root.px, ...sup.px.map((p) => ({ ...p, small: true }))].map((p) => ({ ...p, x: p.x - half }));
+    if (card.fontReady) rasters.set(key, card.pixels);
   }
 
   draw(g, W, top, d, fx) {
@@ -110,8 +120,11 @@ export class ChordLabel {
 
     const place = (p, arrive) => {
       const spread = (1 - arrive) ** 2 + leave * leave;
-      let x = p.x * swell + (hash(p.r, 1) - 0.5) * 90 * d * spread;
-      let y = p.y * swell + (hash(p.r, 2) - 0.5) * 50 * d * spread - leave * 24 * d;
+      let x = p.x * swell, y = p.y * swell - leave * 24 * d;
+      if (spread > 0) { // scattered while it gathers or leaves
+        x += (hash(p.r, 1) - 0.5) * 90 * d * spread;
+        y += (hash(p.r, 2) - 0.5) * 50 * d * spread;
+      }
       x += Math.sin(now * 2.1 + p.row * 0.45) * fx.wobble * 7 * d;
       if (fx.heat > 0.2 && hash(p.row, slipClock) < (fx.heat - 0.2) * 0.35) x += (hash(p.row, slipClock + 7) - 0.5) * fx.heat * 46 * d;
       return [W / 2 + x, top + y];
@@ -126,6 +139,13 @@ export class ChordLabel {
       const pop = springy(clamp((t - delay) / 0.35));
       const bright = rgb(mix(col, [255, 255, 255], 0.7));
       g.fillStyle = rgb(col);
+      // Once every pixel of this layer has landed (and it isn't leaving), they all share one alpha
+      // and sit apart on the grid, so the layer goes out as a single path instead of hundreds of
+      // separate fills.
+      if (leave === 0 && t - delay - 0.12 >= 0.2) {
+        this.paintSettled(g, card, k, face, place, now, fx, alpha, pop, bright);
+        continue;
+      }
       for (const p of card.pixels) {
         if (p.small && k > 1) continue; // the small chord type keeps just one stripe, to stay readable
         if (k > 0 && p.near <= k) continue; // hidden behind a layer in front
@@ -140,5 +160,26 @@ export class ChordLabel {
         if (glint) g.fillStyle = rgb(col);
       }
     }
+  }
+
+  // Layer k of a card whose pixels have all landed: the plain ones as one path per text size, then
+  // the few glinting ones on top. Pixels of one size never overlap, so nothing looks different.
+  paintSettled(g, card, k, face, place, now, fx, alpha, pop, bright) {
+    const glints = [];
+    const big = new Path2D(), small = new Path2D();
+    g.globalAlpha = alpha;
+    for (const p of card.pixels) {
+      if (p.small && k > 1) continue;
+      if (k > 0 && p.near <= k) continue;
+      const [x, y] = place(p, 1);
+      const off = k * p.cell * pop;
+      if (face && hash(p.r, Math.floor(now * 18)) < fx.shimmer * 0.12) glints.push(x + off, y + off, p.size);
+      else (p.small ? small : big).rect(x + off, y + off, p.size, p.size);
+    }
+    g.fill(big);
+    g.fill(small);
+    if (!glints.length) return;
+    g.fillStyle = bright;
+    for (let i = 0; i < glints.length; i += 3) g.fillRect(glints[i], glints[i + 1], glints[i + 2], glints[i + 2]);
   }
 }

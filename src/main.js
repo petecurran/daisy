@@ -69,15 +69,13 @@ const $ = (id) => document.getElementById(id);
 
 // ---------- Knob pages ----------
 
-// Drive / chorus / wobble belong to the current sound; echo / reverb are the shared room.
-const COLOUR = ['drive', 'chorus', 'wobble'];
+// Drive / chorus / wobble belong to the current sound; echo / reverb are the shared room. None of
+// them touch a loop layer once it's locked in.
 const fxKnob = (key, label) => ({
-  label,
-  get: () => (COLOUR.includes(key) ? engine.colour : engine.fx).values[key],
-  set: (v) => (COLOUR.includes(key) ? engine.colour : engine.fx).set({ [key]: v }),
+  label, get: () => engine.sound.values[key], set: (v) => engine.setPedal(key, v),
 });
 const macroKnob = (key, label) => ({
-  label, get: () => engine.macros[key], set: (v) => engine.setMacro(key, v),
+  label, get: () => engine.sound.macros[key], set: (v) => engine.setMacro(key, v),
 });
 
 const KNOB_PAGES = {
@@ -112,8 +110,9 @@ const KNOB_PAGES = {
       fmt: () => engine.drums.kit.name,
     },
     { label: 'Drum tone', get: () => engine.drums.toneAmount, set: (v) => engine.drums.setTone(v) },
-    { label: 'Room', get: () => engine.drums.roomAmount, set: (v) => engine.drums.setRoom(v) },
     { label: 'Pump', get: () => engine.pump, set: (v) => { engine.pump = v; } },
+    // The whole loop's level, to pull it down while playing a new layer over it.
+    { label: 'Loop level', get: () => engine.loopLevel, set: (v) => engine.setLoopLevel(v) },
     { label: 'Drum level', get: () => engine.drums.level, set: (v) => engine.drums.setLevel(v) },
   ],
 };
@@ -221,8 +220,7 @@ function setMode(m) {
   mode = m;
   chords?.allOff();
   engine?.allOff();
-  engine?.pitchBend(0);
-  engine?.modWheel(0);
+  engine?.setExpressive(m === 'notes');
   $('mode-chords').classList.toggle('active', m === 'chords');
   $('mode-notes').classList.toggle('active', m === 'notes');
   $('chord-panel').classList.toggle('dim', m !== 'chords');
@@ -331,6 +329,9 @@ function renderGrid() {
 let lastStep = -1;
 function showStep(step, inBar, globalStep) {
   if (seq && step >= 0) bus.emit('step', { inBar, barSteps: seq.sig.barSteps, beatSteps: seq.sig.beatSteps, global: globalStep });
+  // The settings page is hidden under the stage: don't restyle it every step (it catches up on the
+  // next step after flipping back to it).
+  if (stage?.visible && step >= 0) return;
   if (looper?.hasLoop && globalStep >= looper.start) {
     const pos = (globalStep - looper.start) % looper.length;
     $('loop-progress').style.width = `${((pos + 1) / looper.length) * 100}%`;
@@ -688,8 +689,17 @@ function drawScope() {
   const an = engine.fx.analyser;
   const buf = new Float32Array(an.fftSize);
   const frame = () => {
-    const w = (canvas.width = canvas.clientWidth * devicePixelRatio);
-    const h = (canvas.height = canvas.clientHeight * devicePixelRatio);
+    requestAnimationFrame(frame);
+    if (stage.visible) return; // covered by the stage: drawing it (glow and all) is wasted work
+    // Only resize when the size changes: resizing a canvas reallocates it.
+    const w = (canvas.clientWidth * devicePixelRatio) | 0;
+    const h = (canvas.clientHeight * devicePixelRatio) | 0;
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+    } else {
+      g.clearRect(0, 0, w, h);
+    }
     an.getFloatTimeDomainData(buf);
     // Find a rising zero crossing so the wave stands still.
     let start = 0;
@@ -707,7 +717,6 @@ function drawScope() {
       i ? g.lineTo(x, y) : g.moveTo(x, y);
     }
     g.stroke();
-    requestAnimationFrame(frame);
   };
   frame();
 }

@@ -36,9 +36,9 @@ export function svg(name, cls = '') {
 
 export const KNOB_ICONS = {
   sound: ['voicing', 'sun', 'peak', 'flame', 'waves', 'cassette', 'echo', 'cloud'],
-  drums: ['metronome', 'grid', 'swing', 'drum', 'sun', 'room', 'heart', 'bars'],
+  drums: ['metronome', 'grid', 'swing', 'drum', 'sun', 'heart', 'loop', 'bars'],
 };
 export const KNOB_LABELS = {
   sound: ['Voicing', 'Bright', 'Reso', 'Drive', 'Chorus', 'Wobble', 'Echo', 'Reverb'],
-  drums: ['Tempo', 'Busy', 'Swing', 'Kit', 'Tone', 'Room', 'Pump', 'Level'],
+  drums: ['Tempo', 'Busy', 'Swing', 'Kit', 'Tone', 'Pump', 'Loop', 'Drums'],
 };
