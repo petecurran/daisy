@@ -8,7 +8,8 @@ whatever it cached before (ES modules otherwise happily come out of the HTTP cac
 
 It's also the hand-off between daisy and a Claude chat (see .claude/skills/solo): daisy posts the
 loop to jam/loop.json, Claude writes jam/solo.json, and daisy asks every second whether a newer
-solo has arrived.
+solo has arrived. Every solo is recorded as it plays and lands in jam/recordings
+(http://localhost:5173/jam/recordings/ to listen back).
 
     python3 tools/serve.py [port] [jam folder]
 """
@@ -18,6 +19,8 @@ import json
 import os
 import re
 import sys
+import time
+import urllib.parse
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 5173
@@ -58,6 +61,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.path = re.sub(r'^/v/[^/]+/', '/', self.path)
         super().do_GET()
 
+    # /jam/... is the jam folder (which may live elsewhere, for testing).
+    def translate_path(self, path):
+        clean = urllib.parse.unquote(path.split('?')[0])
+        if clean.startswith('/jam/'):
+            rest = os.path.normpath(clean[len('/jam/'):]).lstrip('/')
+            return os.path.join(JAM, '' if rest == '.' else rest)
+        return super().translate_path(path)
+
     # The newest solo, if it was written after `after` (seconds); 204 otherwise.
     def solo(self, query):
         m = re.search(r'after=([\d.]+)', query)
@@ -74,9 +85,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.reply(200, body, headers=[('X-Written', repr(mtime))])
 
     def do_POST(self):
-        if self.path != '/jam/loop':
-            return self.reply(404)
+        path, _, query = self.path.partition('?')
         body = self.rfile.read(int(self.headers.get('Content-Length', 0)))
+        if path == '/jam/recording':
+            return self.recording(query, body)
+        if path != '/jam/loop':
+            return self.reply(404)
         try:
             loop = json.loads(body)
         except ValueError:
@@ -86,6 +100,16 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         with open(tmp, 'w', encoding='utf-8') as f:
             json.dump(loop, f)
         os.replace(tmp, os.path.join(JAM, 'loop.json'))
+        self.reply(204)
+
+    # A recorded solo: jam/recordings/<date time> <title>.webm
+    def recording(self, query, body):
+        name = urllib.parse.parse_qs(query).get('name', ['solo'])[0]
+        name = re.sub(r'[^\w ,.()-]+', ' ', name.replace(':', ' -')).strip()[:80] or 'solo'
+        folder = os.path.join(JAM, 'recordings')
+        os.makedirs(folder, exist_ok=True)
+        with open(os.path.join(folder, f"{time.strftime('%Y-%m-%d %H%M')} {name}.webm"), 'wb') as f:
+            f.write(body)
         self.reply(204)
 
     def log_message(self, *args):

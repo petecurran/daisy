@@ -10,6 +10,8 @@ second of it changing.
 """
 import json
 import os
+import re
+import shutil
 import sys
 from datetime import datetime, timezone
 
@@ -139,6 +141,10 @@ def play(file):
     with open(tmp, 'w', encoding='utf-8') as f:
         json.dump(solo, f)
     os.replace(tmp, os.path.join(JAM, 'solo.json'))  # daisy never sees a half-written file
+    # Keep the loop it was first played over next to the take, so the pair can be heard again.
+    paired = re.sub(r'\.json$', '', file) + '.loop.json'
+    if not os.path.exists(paired):
+        shutil.copyfile(os.path.join(JAM, 'loop.json'), paired)
     print('Handed to daisy: it comes in at the top of the loop.')
 
 

@@ -14,6 +14,8 @@
 // locked in, nothing you do to the live sound touches it. The whole loop has one level (the Loop
 // knob), so it can be pulled down while you play a new layer over it.
 
+import { ALL_PRESETS } from './audio/presets.js';
+
 const DOUBLE_TAP_MS = 350;
 const HOLD_MS = 650;
 
@@ -179,6 +181,26 @@ export class Looper {
     this.engine.stopLoopVoices();
     this.engine.setLoopLevel(1); // a fresh loop starts at full level
     this.setState('empty');
+  }
+
+  // Bring back a shared loop (jam/loop.json) after a reload, stopped: tap to play it.
+  restore({ steps, layers }) {
+    this.clear();
+    for (const l of layers) {
+      const preset = ALL_PRESETS.find((p) => p.id === l.preset) ?? ALL_PRESETS.find((p) => p.name === l.sound);
+      if (!preset || !l.notes.length) continue;
+      const layer = {
+        id: nextId++, sound: this.engine.loopSound(this.engine.liveSound(preset)), muted: l.muted, byStep: new Map(),
+        events: l.notes.map(([step, note, len, vel]) => ({ step, note, len, vel })),
+        get preset() { return this.sound.preset; },
+      };
+      if (layer.muted) this.engine.setMuted(layer.sound, true);
+      this.index(layer);
+      this.layers.push(layer);
+    }
+    if (!this.layers.length) return;
+    this.length = steps;
+    this.setState('stopped');
   }
 
   // ---------- layers ----------

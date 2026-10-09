@@ -70,6 +70,20 @@ export const ALL_PRESETS = [
     fx: { drive: 0.2, chorus: 0.4, wobble: 0.85, echo: 0.3, reverb: 0.4 },
   },
   {
+    id: 'piano',
+    name: 'Pub Piano',
+    inspired: 'A well-played upright / Yamaha CP-70',
+    blurb: 'Bright, percussive piano: a hammer knock, a long fading ring. Pound it.',
+    color: '#f4f0e6',
+    // Two-operator FM with the brightness falling away fast, like a hammered string; a slightly
+    // out-of-tune knock on top for the hammer; a touch of chorus for the beating of a string trio.
+    fm: { ratio: 1, index: 1.5, indexDecay: 0.45, velToIndex: 1.8, bark: { ratio: 7.03, level: 0.06, decay: 0.015 } },
+    filter: { cutoff: 5200, q: 0.6, env: 0, keytrack: 0.25 },
+    fenv: { a: 0, d: 1, s: 1, r: 1 },
+    aenv: { a: 0.002, d: 4.5, s: 0.0, r: 0.35 },
+    fx: { drive: 0.08, chorus: 0.12, wobble: 0.0, echo: 0.0, reverb: 0.3 },
+  },
+  {
     id: 'crunch',
     name: 'Crunch Guitar',
     inspired: 'Les Paul into a cranked Marshall',

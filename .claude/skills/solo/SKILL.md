@@ -53,7 +53,8 @@ Write it to `jam/takes/<NN>-<short-name>.json` (count up from the takes already 
 - The solo can last several times round the loop (e.g. 8 bars over a 4-bar loop). It plays once,
   then stops.
 - `sound` is optional: `lead` (Singing Lead, the default) or any daisy preset id (`velvet`,
-  `sunday`, `honey`, `cassette`, `crunch`). `crunch` (Crunch Guitar) is an overdriven electric
+  `sunday`, `honey`, `cassette`, `piano`, `crunch`). `piano` (Pub Piano) is the acoustic-ish
+  piano: use it for piano solos (Ben Folds, Elton, boogie). `crunch` (Crunch Guitar) is an overdriven electric
   guitar: the one to use when the user asks for guitar, rock or metal. (`chug`, Metal Chug, is a
   rhythm sound for the user's loops, not for solos: it plays power chords, so the chart shows
   `E5`-style chords with no third. Take major or minor from the key and the riff.)
@@ -64,7 +65,10 @@ Write it to `jam/takes/<NN>-<short-name>.json` (count up from the takes already 
 python3 tools/jam.py play jam/takes/01-easing-in.json
 ```
 
-It checks the notes, lists any outside the key (fine if they're meant), and hands it to daisy.
+It checks the notes, lists any outside the key (fine if they're meant), hands it to daisy, and
+keeps a copy of the loop next to the take (`<take>.loop.json`). daisy records every solo as it
+plays, loop and drums included, into `jam/recordings/` (the user can listen back at
+http://localhost:5173/jam/recordings/).
 Then tell the user in a line or two what you went for, and offer to take another. "Again" means
 running `play` on the same file. To change something, write a new take (keep the old ones, so they
 can go back to one).

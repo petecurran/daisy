@@ -1,12 +1,14 @@
 // Jamming with Claude. daisy shares the loop with a Claude chat through the local server
 // (jam/loop.json), and plays whatever solo comes back (jam/solo.json) from the top of the loop.
-// The chat side lives in .claude/skills/solo.
+// The chat side lives in .claude/skills/solo. Every solo is recorded as it plays (loop, drums and
+// all) into jam/recordings, and the last loop comes back after a reload.
 //
 // A solo is a list of notes, each [bar, beat, note, beats, velocity?, expression?]: bar and beat
 // count from 1 at the top of the loop (beats in the time signature's pulse), note is a MIDI number
 // or a name like "E4", and expression is { from, slide, bend, release, vib } (see Voice.express).
 
 import { ALL_PRESETS } from './audio/presets.js';
+import { patternsFor } from './drums/patterns.js';
 import { Sound } from './audio/sound.js';
 import { NOTE_NAMES } from './chords.js';
 import { bus } from './bus.js';
@@ -26,15 +28,43 @@ function noteNumber(name) {
 }
 
 export class Jam {
-  constructor(engine, seq, looper, { key }) {
+  constructor(engine, seq, looper, { key, setKey }) {
     this.engine = engine;
     this.seq = seq;
     this.looper = looper;
     this.key = key;
+    this.setKey = setKey;
     this.solo = null; // { title, sound, byStep, steps, state: 'cued' | 'playing', start, overLoop }
     this.after = Date.now() / 1000; // only solos written from now on (not one left from last time)
     this.shared = '';
+    this.recorders = 0;
     setInterval(() => this.poll(), POLL_MS);
+    this.restore();
+  }
+
+  // ---------- the last loop, back after a reload ----------
+
+  async restore() {
+    let loop;
+    try {
+      const res = await fetch('/jam/loop.json', { cache: 'no-store' });
+      if (!res.ok) return;
+      loop = await res.json();
+    } catch {
+      return;
+    }
+    if (this.looper.state !== 'empty' || this.seq.playing || !loop.layers?.length) return; // already playing
+    const { seq } = this;
+    if (seq.sigId !== loop.sig) seq.setSignature(loop.sig);
+    const pattern = patternsFor(loop.sig).find((p) => p.name === loop.drums);
+    if (pattern) seq.setPattern(pattern);
+    seq.setBpm(loop.bpm);
+    this.engine.syncEcho(seq.bpm);
+    const [tonic, mode] = loop.key.split(' ');
+    this.setKey(NOTE_NAMES.indexOf(tonic), mode);
+    this.looper.restore(loop);
+    this.shared = JSON.stringify(this.snapshot());
+    bus.emit('hint', { text: 'Your last loop is back: pad 8 plays it, hold pad 8 to clear it', color: '#e0af68' });
   }
 
   // ---------- sharing the loop ----------
@@ -67,6 +97,7 @@ export class Jam {
       // Each note: [step from the top of the loop (16ths), MIDI note, length in 16ths, velocity]
       layers: looper.layers.map((l) => ({
         sound: l.sound.preset.name,
+        preset: l.sound.preset.id,
         muted: l.muted,
         notes: l.events.map((e) => [e.step, e.note, Math.round(e.len * 100) / 100, e.vel]).sort((a, b) => a[0] - b[0]),
       })),
@@ -132,6 +163,7 @@ export class Jam {
   // Cut it off (replaced, or the loop went away).
   stop() {
     if (!this.solo) return;
+    this.stopRecording(this.solo, 0);
     this.engine.dropSound(this.solo.sound);
     if (this.solo.state === 'cued') bus.emit('hint', null);
     this.solo = null;
@@ -140,8 +172,35 @@ export class Jam {
   // Played to the end: let the last notes ring out before unplugging its sound.
   finish() {
     const { sound } = this.solo;
+    this.stopRecording(this.solo, 3000);
     this.solo = null;
     setTimeout(() => this.engine.dropSound(sound), 3000);
+  }
+
+  // ---------- recording ----------
+
+  // Everything you hear (after the master compressor), from a bar before the solo comes in.
+  startRecording(solo) {
+    if (solo.recorder || !window.MediaRecorder) return;
+    this.tap ??= this.engine.ctx.createMediaStreamDestination();
+    if (!this.recorders++) this.engine.fx.comp.connect(this.tap); // two can overlap while one rings out
+    const rec = new MediaRecorder(this.tap.stream, { mimeType: 'audio/webm;codecs=opus', audioBitsPerSecond: 192000 });
+    const chunks = [];
+    rec.ondataavailable = (e) => chunks.push(e.data);
+    rec.onstop = () => {
+      if (!--this.recorders) this.engine.fx.comp.disconnect(this.tap);
+      if (solo.state !== 'playing') return; // never got going
+      fetch(`/jam/recording?name=${encodeURIComponent(solo.title)}`, { method: 'POST', body: new Blob(chunks, { type: 'audio/webm' }) })
+        .catch((e) => console.warn('Couldn\'t save the recording:', e));
+    };
+    rec.start();
+    solo.recorder = rec;
+  }
+
+  // Once the last notes and echoes have rung out.
+  stopRecording(solo, afterMs) {
+    const rec = solo.recorder;
+    if (rec?.state === 'recording') setTimeout(() => rec.stop(), afterMs);
   }
 
   // The top of the loop (or of a bar, when it's just the drums).
@@ -157,7 +216,9 @@ export class Jam {
     const s = this.solo;
     if (!s) return;
     if (s.state === 'cued') {
+      if (this.isTop(step + this.seq.sig.barSteps)) this.startRecording(s);
       if (!this.isTop(step)) return;
+      this.startRecording(s); // came in with less than a bar to go
       Object.assign(s, { state: 'playing', start: step, overLoop: this.looper.hasLoop });
       bus.emitAt(this.engine.ctx, t, 'hint', { text: s.title, color: s.preset.color });
     }
