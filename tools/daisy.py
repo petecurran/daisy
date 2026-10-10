@@ -63,11 +63,16 @@ local = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
 def answers(port):
+    global last_error
     try:
         local.open(f'http://127.0.0.1:{port}/jam/loops', timeout=0.5)
         return True
-    except OSError:
+    except OSError as e:
+        last_error = e
         return False
+
+
+last_error = None
 
 
 def detached():
@@ -102,7 +107,7 @@ def start_server(port=PORT, jam=None):
             return
         time.sleep(0.1)
     with open(log) as f:
-        sys.exit(f'The daisy server didn\'t start on port {port}. Its output ({log}):\n{f.read()}')
+        sys.exit(f'The daisy server didn\'t start on port {port} ({last_error}). Its output ({log}):\n{f.read()}')
 
 
 def main():

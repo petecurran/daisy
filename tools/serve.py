@@ -178,4 +178,6 @@ def prune(folder, limit, keep=None):
 
 
 handler = functools.partial(Handler, directory=ROOT)
-http.server.ThreadingHTTPServer(('127.0.0.1', PORT), handler).serve_forever()
+server = http.server.ThreadingHTTPServer(('127.0.0.1', PORT), handler)
+print(f'daisy on http://localhost:{PORT}, jam folder {JAM}', flush=True)
+server.serve_forever()
