@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 tools/jam.py:*)",
+      "Edit(jam/takes/**)"
+    ]
+  }
+}

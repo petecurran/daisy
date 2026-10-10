@@ -14,6 +14,7 @@ WebGL, ES modules, **no build step and no dependencies**.
 ## Layout
 
 - `src/main.js` — wiring: MIDI input, pads/knob pages, modes, keyboard shortcuts, splash.
+- `src/midi.js` — Web MIDI input from every connected device, normalised into note/CC/bend events.
 - `src/chords.js` — chord engine (key + joystick zone → chord, voice leading, octave-aware).
 - `src/audio/` — synth engine, voices, presets, effects.
 - `src/drums/` — synthesized kits, step patterns (one char per 16th, digit = importance),
