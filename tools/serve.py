@@ -19,6 +19,7 @@ import http.server
 import json
 import os
 import re
+import socketserver
 import sys
 import threading
 import time
@@ -177,7 +178,15 @@ def prune(folder, limit, keep=None):
         os.remove(oldest)
 
 
+class Server(http.server.ThreadingHTTPServer):
+    # Python's server looks its own name up in DNS as it starts: on a Mac that can hang for half a
+    # minute, and daisy only ever answers to localhost anyway.
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = 'localhost', self.server_address[1]
+
+
 handler = functools.partial(Handler, directory=ROOT)
-server = http.server.ThreadingHTTPServer(('127.0.0.1', PORT), handler)
+server = Server(('127.0.0.1', PORT), handler)
 print(f'daisy on http://localhost:{PORT}, jam folder {JAM}', flush=True)
 server.serve_forever()
