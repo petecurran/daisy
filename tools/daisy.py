@@ -11,6 +11,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.request
 
@@ -57,9 +58,13 @@ def profile():
     return os.path.expanduser('~/.config/daisy-chromium')
 
 
+# Straight to this machine: never through a proxy the system settings might name.
+local = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
 def answers(port):
     try:
-        urllib.request.urlopen(f'http://127.0.0.1:{port}/jam/loops', timeout=0.5)
+        local.open(f'http://127.0.0.1:{port}/jam/loops', timeout=0.5)
         return True
     except OSError:
         return False
@@ -76,7 +81,7 @@ def stop_server(port=PORT):
     if not answers(port):
         return
     try:
-        urllib.request.urlopen(urllib.request.Request(f'http://127.0.0.1:{port}/quit', method='POST'), timeout=1)
+        local.open(urllib.request.Request(f'http://127.0.0.1:{port}/quit', method='POST'), timeout=1)
     except OSError:
         return  # a server from before /quit existed: it carries on, and that's fine
     for _ in range(20):
@@ -89,13 +94,15 @@ def start_server(port=PORT, jam=None):
     """(Re)start the local server, so it's always the current version of tools/serve.py."""
     stop_server(port)
     args = [sys.executable, os.path.join(ROOT, 'tools', 'serve.py'), str(port)] + ([jam] if jam else [])
-    subprocess.Popen(args, cwd=ROOT, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                     stderr=subprocess.DEVNULL, **detached())
+    log = os.path.join(tempfile.gettempdir(), f'daisy-server-{port}.log')  # its errors, if it has any
+    with open(log, 'w') as out:
+        subprocess.Popen(args, cwd=ROOT, stdin=subprocess.DEVNULL, stdout=out, stderr=out, **detached())
     for _ in range(50):
         if answers(port):
             return
         time.sleep(0.1)
-    sys.exit(f'The daisy server didn\'t start on port {port}.')
+    with open(log) as f:
+        sys.exit(f'The daisy server didn\'t start on port {port}. Its output ({log}):\n{f.read()}')
 
 
 def main():
