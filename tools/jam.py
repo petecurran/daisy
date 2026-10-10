@@ -16,6 +16,7 @@ import os
 import re
 import shutil
 import sys
+import time
 from datetime import datetime, timezone
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
@@ -154,7 +155,13 @@ def hand_over(data):
     tmp = os.path.join(JAM, 'solo.json.tmp')
     with open(tmp, 'w', encoding='utf-8') as f:
         json.dump(data, f)
-    os.replace(tmp, os.path.join(JAM, 'solo.json'))  # daisy never sees a half-written file
+    # daisy never sees a half-written file. Windows refuses while the server is reading the old one.
+    for _ in range(20):
+        try:
+            return os.replace(tmp, os.path.join(JAM, 'solo.json'))
+        except PermissionError:
+            time.sleep(0.05)
+    os.replace(tmp, os.path.join(JAM, 'solo.json'))
 
 
 def play(files, video=False):

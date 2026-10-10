@@ -9,7 +9,7 @@ Writes Program 1 (saved) and RAM (live). Protocol from soyersoyer/sysex-controls
 query F0 47 7F 26 66 00 01 <prog> F7, reply/write body = 108 bytes after <prog>.
 Byte 0 = pad channel, 6 = arp clock source (0 internal, 1 external), 16 = joystick vertical mode (2 = dual CC), 17/18 = its CCs.
 """
-import os, re, subprocess, sys, time
+import os, re, shutil, subprocess, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -17,6 +17,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def find_port():
+    if not shutil.which('aseqdump') or not shutil.which('aseqsend'):
+        sys.exit('This needs Linux\'s ALSA tools (aseqdump/aseqsend, in alsa-utils). On macOS or Windows, '
+                 'set the MPK up with Akai\'s MPK mini mkII Editor instead: see "Controller setup" in docs/GUIDE.md.')
     out = subprocess.run(['aseqdump', '-l'], capture_output=True, text=True).stdout
     for line in out.splitlines():
         if 'MPKmini2' in line:

@@ -492,7 +492,7 @@ $('start').onclick = () => ensureEngine();
 $('stage').addEventListener('pointerdown', () => ensureEngine());
 
 // The stage is the home view from the moment the page opens. Audio needs a click or key press
-// unless Chromium was started with --autoplay-policy=no-user-gesture-required (tools/daisy.sh),
+// unless Chromium was started with --autoplay-policy=no-user-gesture-required (tools/daisy.py),
 // in which case touching the MPK is enough.
 function updateSplash() {
   const running = engine?.ctx.state === 'running';

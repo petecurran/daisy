@@ -5,16 +5,18 @@ A warm, tactile browser synth for the Akai MPK Mini Mk II, inspired by the Telep
 ## Run
 
 ```bash
-tools/daisy.sh
+python3 tools/daisy.py
 ```
 
-Starts the local server and opens daisy full-screen in its own Chromium app window. Press a key
+(On Windows it's `python tools\daisy.py`.) Starts the local server and opens daisy full-screen in
+its own browser app window: Chrome, Edge, Chromium or Brave, whichever it finds first (set
+`DAISY_BROWSER` to a browser's path to choose). Press a key
 or pad on the MPK (or any computer key) to start; until then the knobs warp the logo and the
 joystick pushes it about. That window is allowed to start sound without a click. Allow MIDI
 the first time. **V** flips to the settings/debug page.
 
-Or manually: `python3 tools/serve.py` and open http://localhost:5173 (this server disables caching,
-so a refresh always gets the latest code).
+Or manually: `python3 tools/serve.py` and open http://localhost:5173 in one of those browsers (this
+server disables caching, so a refresh always gets the latest code).
 
 ## Controls
 
@@ -72,7 +74,7 @@ hands it back; it comes in at the top of your loop a few seconds later. No copyi
 
 Behind the scenes: `src/jam.js` shares the loop and plays solos, `tools/serve.py` is the hand-off,
 `tools/jam.py` is the chat side (chord chart, play, stop) and `.claude/skills/solo` tells Claude
-how to do it. After pulling new code, restart with `tools/daisy.sh` so the server is current.
+how to do it. After pulling new code, restart with `tools/daisy.py` so the server is current.
 
 ## Stage view (visuals)
 
@@ -94,5 +96,8 @@ python3 tools/mpk-setup.py
 ```
 
 `python3 tools/mpk-setup.py --restore` writes back the original settings saved in
-`tools/mpk-backup-factory.txt`. Once reprogrammed, K1 controls chord voicing. Note the
+`tools/mpk-backup-factory.txt`. That script is Linux-only (it uses ALSA). On macOS or Windows, use
+Akai's free MPK mini mkII Editor (from akaipro.com) to make the same changes to Program 1: joystick
+up/down as two separate CCs, up = 17 and down = 16; pads on MIDI channel 10; arpeggiator clock set
+to external. Then send it to the MPK. Once reprogrammed, K1 controls chord voicing. Note the
 arpeggiator only runs while the daisy page is open (it needs the page's clock).

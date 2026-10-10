@@ -18,7 +18,8 @@ python3 tools/jam.py
 
 This prints the tempo, time signature, key, drum pattern, each layer, a beat-by-beat chord chart,
 and every note change. If it says the loop was shared a long time ago, say so (maybe daisy's
-server is an old one: `tools/daisy.sh` restarts it).
+server is an old one: `python3 tools/daisy.py` restarts it). On Windows the command is `python`, not
+`python3`.
 
 ## 2. Write the solo
 

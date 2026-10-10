@@ -9,7 +9,8 @@ whatever it cached before (ES modules otherwise happily come out of the HTTP cac
 It's also the hand-off between daisy and a Claude chat (see .claude/skills/solo): daisy posts the
 loop to jam/loop.json, Claude writes jam/solo.json, and daisy asks every second whether a newer
 solo has arrived. Every solo is recorded as it plays and lands in jam/recordings
-(http://localhost:5173/jam/recordings/ to listen back).
+(http://localhost:5173/jam/recordings/ to listen back). POST /quit stops it (tools/daisy.py uses
+that to restart it with the current code).
 
     python3 tools/serve.py [port] [jam folder]
 """
@@ -19,6 +20,7 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 import urllib.parse
 
@@ -36,7 +38,24 @@ def version():
     return str(int(newest))
 
 
+def replace(tmp, path):
+    """Swap a finished file into place. Windows refuses while someone is reading it: wait a moment."""
+    for _ in range(20):
+        try:
+            return os.replace(tmp, path)
+        except PermissionError:
+            time.sleep(0.05)
+    os.replace(tmp, path)
+
+
 class Handler(http.server.SimpleHTTPRequestHandler):
+    # Not left to the system: Windows' registry can call .js text/plain, which no browser will run
+    # as a module.
+    extensions_map = {
+        **http.server.SimpleHTTPRequestHandler.extensions_map,
+        '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.woff2': 'font/woff2',
+    }
+
     # Only this machine's own pages: a web page elsewhere (or one that rebinds its DNS name to
     # 127.0.0.1) mustn't be able to read the jam folder or write into it.
     def local(self):
@@ -105,6 +124,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         body = self.rfile.read(int(self.headers.get('Content-Length', 0)))
         if not self.local():
             return self.reply(403)
+        if path == '/quit':
+            self.reply(204)
+            return threading.Thread(target=self.server.shutdown).start()
         if path == '/jam/recording':
             return self.recording(query, body)
         if path != '/jam/loop':
@@ -119,7 +141,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         tmp = os.path.join(JAM, 'loop.json.tmp')
         with open(tmp, 'w', encoding='utf-8') as f:
             json.dump(loop, f)
-        os.replace(tmp, os.path.join(JAM, 'loop.json'))
+        replace(tmp, os.path.join(JAM, 'loop.json'))
         # Every loop also lives on a key of its own (jam/loops/<MIDI note>.json).
         if isinstance(loop.get('slot'), int):
             os.makedirs(os.path.join(JAM, 'loops'), exist_ok=True)
